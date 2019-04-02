@@ -1,0 +1,125 @@
+trigger:
+- master
+
+pr:
+- master
+
+jobs:
+- job: Build
+  pool:
+    vmImage: 'vs2017-win2016'
+  steps:
+    - task: DotNetCoreInstaller@0
+      inputs:
+        packageType: 'sdk'
+        version: '2.2.102'
+    - task: NuGetToolInstaller@0
+      inputs:
+        versionSpec: '4.9.X'
+    - task: NuGetCommand@2
+      inputs:
+        command: 'custom'
+        feedsToUse: 'config'
+        arguments: ${{ format('restore "{0}" -DirectDownload -NoCache', './GraphQL.Annotations.TSql.sln') }}
+    - task: VSBuild@1
+      inputs:
+        solution: ./GraphQL.Annotations.TSql.sln
+        msbuildArgs: /p:Configuration=Release /p:DeployOnBuild=true /p:WebPublishMethod=Package /p:PackageAsSingleFile=true /p:SkipInvalidConfigurations=true /p:PackageLocation="$(build.artifactstagingdirectory)\\" /p:VersionSuffix=$(Build.BuildId)
+    - task: CopyFiles@2
+      inputs:
+        contents: '**\bin\**\Release\**\*.nupkg'
+        targetFolder: '$(build.artifactstagingdirectory)'
+        cleanTargetFolder: true
+        flattenFolders: true
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        artifactName: 'Packages'
+        artifactType: container
+        parallel: true
+    - task: NuGetCommand@2
+      inputs:
+        command: push
+        nuGetFeedType: external
+        publishFeedCredentials: 'Nuget.org'
+        packagesToPush: '$(Build.ArtifactStagingDirectory)/**/*.nupkg'
+- job: Resharper
+  pool:
+    vmImage: 'vs2017-win2016'
+  steps:
+    - task: DotNetCoreInstaller@0
+      inputs:
+        packageType: 'sdk'
+        version: '2.2.102'
+    - task: NuGetToolInstaller@0
+      inputs:
+        versionSpec: '4.9.X'
+    - task: NuGetCommand@2
+      inputs:
+        command: 'custom'
+        feedsToUse: 'config'
+        arguments: ${{ format('restore "{0}" -DirectDownload -NoCache', './GraphQL.Annotations.TSql.sln') }}
+    - task: NuGetCommand@2
+      inputs:
+        command: 'custom'
+        feedsToUse: 'config'
+        arguments: ${{ format('install JetBrains.ReSharper.CommandLineTools -Version {0} -NonInteractive -DirectDownload -NoCache', '2018.2.3') }}
+    - powershell: >
+        function Write-StdErr {
+            param ([PSObject] $InputObject)
+            $outFunc = if ($Host.Name -eq 'ConsoleHost') {
+                [Console]::Error.WriteLine
+            } else {
+                $host.ui.WriteErrorLine
+            }
+            if ($InputObject) {
+                [void] $outFunc.Invoke($InputObject.ToString())
+            } else {
+                [string[]] $lines = @()
+                $Input | % { $lines += $_.ToString() }
+                [void] $outFunc.Invoke($lines -join "`r`n")
+            }
+        }
+
+        $resharperVersion = $Env:resharperVersion
+
+        $fishResharperVersion = $Env:fishResharperVersion
+
+        $dotSettings = "GraphQL.Annotations.TSql.sln.DotSettings"
+
+        $solution = $Env:solution
+
+        $paths = New-Object System.Collections.Generic.List[string]
+
+        $loc = Get-Location
+
+        $loc = $loc.ToString() + "\"
+
+        $Path = "$(Build.ArtifactStagingDirectory)\InspectCode.xml"
+
+        &"JetBrains.ReSharper.CommandLineTools.${resharperVersion}\tools\inspectcode.exe" "$solution" /toolset=15.0 /no-swea /profile="$dotSettings" /o="$Path"
+
+        Select-Xml -Path $Path -XPath //Project/Issue | Select-Object -ExpandProperty Node | ForEach-Object -Process {
+            $id = $_.TypeId
+            $xPath = "//IssueType[@Id=""$id""]"
+            $issueNode = Select-Xml -Path $Path -XPath $xPath | Select-Object -ExpandProperty Node
+            $file = $_.File
+            $line = $_.Line
+            $offset = $_.Offset
+            $severity = $_.Severity
+            $typeId = $_.TypeId
+            $message = $_.Message
+            $msg = "$file($line,$offset): $severity ${typeId}: $message"
+            if ($issueNode.Severity -eq 'ERROR')
+            {
+                Write-StdErr "##[error] $msg"
+            }
+            else
+            {
+                Write-Output "##[warning] $msg"
+            }
+        }
+      failOnStderr: true
+      env:
+          resharperVersion: '2018.2.3'
+          solution: ./GraphQL.Annotations.TSql.sln
