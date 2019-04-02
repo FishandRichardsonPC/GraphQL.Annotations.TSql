@@ -10,6 +10,9 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <PackageReference Include="GitVersionTask" Version="4.0.0">
+            <PrivateAssets>all</PrivateAssets>
+        </PackageReference>
       <ProjectReference Include="..\GraphQL.Annotations.TSql\GraphQL.Annotations.TSql.csproj" />
     </ItemGroup>
 

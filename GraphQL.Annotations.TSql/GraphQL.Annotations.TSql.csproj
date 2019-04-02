@@ -10,6 +10,9 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <PackageReference Include="GitVersionTask" Version="4.0.0">
+            <PrivateAssets>all</PrivateAssets>
+        </PackageReference>
         <PackageReference Include="Dapper" Version="1.50.5" />
         <PackageReference Include="GraphQL" Version="2.4.0" />
         <PackageReference Include="GraphQL.Annotations" Version="1.0.5" />
