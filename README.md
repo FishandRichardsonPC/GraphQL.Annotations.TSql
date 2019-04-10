@@ -5,7 +5,8 @@
 
 
 C# Library for adding objects which map to TSQL Tables to a graphql schema, Intended to be used with the GraphQL 
-package on nuget. A sample project is included with schema
+package on nuget. A sample project is included with the db schema required to run it. The client side code is based on
+the react ui from [haikyuu/graphql-todo-list](https://github.com/haikyuu/graphql-todo-list/tree/master/client/src) 
 
 # Usage
 TODO

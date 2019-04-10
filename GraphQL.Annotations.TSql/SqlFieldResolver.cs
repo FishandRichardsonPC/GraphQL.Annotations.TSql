@@ -39,6 +39,10 @@ namespace GraphQL.Annotations.TSql
 			IEnumerable<DbField> fields = null,
 			bool includeAll = false
 		);
+
+		string Table { get; }
+		string DefaultOrder { get; }
+		string PrimaryProperty { get; }
 	}
 
 	internal static class SqlFieldResolverData
@@ -77,9 +81,9 @@ namespace GraphQL.Annotations.TSql
 	    // ReSharper disable once InconsistentNaming - The _ notation is to avoid naming conflicts with non system fields
 	    public int? _count { get; set; }
 
-		public abstract string Table { get; }
-		public abstract string DefaultOrder { get; }
-		public abstract string PrimaryProperty { get; }
+	    public abstract string Table { get; }
+	    public abstract string DefaultOrder { get; }
+	    public abstract string PrimaryProperty { get; }
 
 		public BatchItem LastBatchItem { get; private set; }
 
@@ -622,7 +626,7 @@ namespace GraphQL.Annotations.TSql
 			}
 
 
-		    var agg = context.GetService<AggregationSqlFieldGenerator>();
+		    var agg = context.GetRequiredService<AggregationSqlFieldGenerator>();
 		    if (agg.IsAggregation(batch))
 		    {
 		        agg.GetExtraParams(batch, context, this, parameters);
@@ -940,13 +944,13 @@ namespace GraphQL.Annotations.TSql
 			string previousFrom = null,
 			string joinTo = null)
 		{
-		    var agg = context.GetService<AggregationSqlFieldGenerator>();
+		    var agg = context.GetRequiredService<AggregationSqlFieldGenerator>();
 		    if (agg.IsAggregation(batch))
 		    {
 		        return agg.BuildQuery(batch, context, this, previousFrom, joinTo);
 		    }
 
-			return context.GetService<StandardSqlFieldGenerator>().BuildQuery(batch, context, this, previousFrom, joinTo);
+			return context.GetRequiredService<StandardSqlFieldGenerator>().BuildQuery(batch, context, this, previousFrom, joinTo);
 		}
 
 		public virtual int GetCount(IDictionary<string, object> arguments, ResolveFieldContext context)
@@ -988,7 +992,7 @@ namespace GraphQL.Annotations.TSql
 			string query;
 
 			Dictionary<string, DbValue> parameters;
-			var agg = context.GetService<AggregationSqlFieldGenerator>();
+			var agg = context.GetRequiredService<AggregationSqlFieldGenerator>();
 			if (agg.IsAggregation(baseBatch))
 			{
 				var oldArguments = context.Arguments;
@@ -1073,7 +1077,7 @@ namespace GraphQL.Annotations.TSql
 
 		private SqlConnection GetConnection(ResolveFieldContext context)
 		{
-			return context.GetService<ISqlConnectionGetter>().GetConnection(context);
+			return context.GetRequiredService<ISqlConnectionGetter>().GetConnection(context);
 		}
 
 		public virtual object Resolve(ResolveFieldContext context)
@@ -1316,7 +1320,8 @@ namespace GraphQL.Annotations.TSql
             {typeof(decimal), SqlDbType.Money},
             {typeof(float), SqlDbType.Real},
             {typeof(double), SqlDbType.Float},
-            {typeof(TimeSpan), SqlDbType.Time}
+            {typeof(TimeSpan), SqlDbType.Time},
+            {typeof(Guid), SqlDbType.UniqueIdentifier}
         };
 
         public SqlDbType Type;

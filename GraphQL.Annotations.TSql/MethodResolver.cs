@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using GraphQL.Annotations.TSql.Mutation;
 using GraphQL.Resolvers;
 using GraphQL.Types;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace GraphQL.Annotations.TSql
 {
@@ -21,7 +22,7 @@ namespace GraphQL.Annotations.TSql
 			foreach (var item in source)
 			{
 				someObjectType
-					.GetProperty(item.Key, BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.IgnoreCase)
+					.GetProperty(item.Key, BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.IgnoreCase)?
 					.SetValue(someObject, item.Value, null);
 			}
 
@@ -104,7 +105,7 @@ namespace GraphQL.Annotations.TSql
 							{
 								value = list.Cast<Dictionary<string, object>>();
 								cast = typeof(ObjectExtensions)
-									.GetMethod("ToObjects")
+									.GetMethod("ToObjects")?
 									.MakeGenericMethod(
 										v.ParameterType.ContainsGenericParameters
 											? v.ParameterType.GenericTypeArguments[0]
@@ -114,7 +115,7 @@ namespace GraphQL.Annotations.TSql
 							else
 							{
 								cast = typeof(Enumerable)
-									.GetMethod("Cast")
+									.GetMethod("Cast")?
 									.MakeGenericMethod(
 										v.ParameterType.ContainsGenericParameters
 											? v.ParameterType.GenericTypeArguments[0]
@@ -122,18 +123,21 @@ namespace GraphQL.Annotations.TSql
 									);
 							}
 
-							var castList = cast.Invoke(value, new[] {value});
+							var castList = cast?.Invoke(value, new[] {value});
 							if (v.ParameterType.IsArray)
 							{
 								var toArray = typeof(Enumerable)
-									.GetMethod("ToArray")
+									.GetMethod("ToArray")?
 									.MakeGenericMethod(v.ParameterType.GetElementType());
-								return toArray.Invoke(castList, new[] {castList});
+								return toArray?.Invoke(castList, new[] {castList});
 							}
 							else
 							{
 								return castList;
 							}
+						} else if (v.ParameterType == typeof(Guid) || v.ParameterType == typeof(Guid?))
+						{
+							return Guid.Parse(value.ToString());
 						}
 
 						return value;
@@ -148,9 +152,9 @@ namespace GraphQL.Annotations.TSql
 		)
 		{
 			var type = new FieldType();
-			type.Name = methodAttr.NameSuffix ?
-				Utils.FirstCharacterToLower(method.DeclaringType.Name) + '_' + Utils.FirstCharacterToLower(method.Name) :
-				Utils.FirstCharacterToLower(method.DeclaringType.Name);
+			type.Name = methodAttr?.NameSuffix != true ?
+				Utils.FirstCharacterToLower(method.DeclaringType?.Name) + '_' + Utils.FirstCharacterToLower(method.Name) :
+				Utils.FirstCharacterToLower(method.DeclaringType?.Name);
 			type.Arguments = new QueryArguments(
 				method.GetParameters()
 					.Where(p => p.ParameterType != typeof(ResolveFieldContext))
@@ -165,7 +169,11 @@ namespace GraphQL.Annotations.TSql
 									: (
 										p.ParameterType.IsEnum
 											? typeof(EnumerationGraphType<>).MakeGenericType(p.ParameterType)
-											: p.ParameterType.GetGraphTypeFromType()
+											: (
+												p.ParameterType == typeof(Guid) || p.ParameterType == typeof(Guid?)
+													? typeof(StringGraphType)
+													: p.ParameterType.GetGraphTypeFromType()
+											)
 									)
 							)
 						)
@@ -175,14 +183,14 @@ namespace GraphQL.Annotations.TSql
 						};
 					})
 			);
-			type.Type = methodAttr.ReturnGraphType ?? (
+			type.Type = methodAttr?.ReturnGraphType ?? (
 				method.ReturnType.IsGraphType() ? method.ReturnType : (
 					method.ReturnType == typeof(void) ?
 						typeof(VoidType) :
 						method.ReturnType.GetGraphTypeFromType()
 				)
 			);
-			type.Resolver = (IFieldResolver)serviceProvider.GetService(
+			type.Resolver = (IFieldResolver)serviceProvider.GetRequiredService(
 				typeof(MethodResolver<>).MakeGenericType(method.DeclaringType)
 			);
 			return type;
