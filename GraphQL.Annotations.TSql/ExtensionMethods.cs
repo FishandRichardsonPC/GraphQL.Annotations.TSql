@@ -156,24 +156,23 @@ namespace GraphQL.Annotations.TSql
         private static IEnumerable<MethodInfo> GetMutationMethodInfos<T>()
         {
 	        return typeof(T).Assembly.GetTypes()
-		        .Where(t => t.IsPublic)
-		        .Where(t => !t.IsGenericType)
-		        .Where(t => !t.IsAbstract)
-		        .Select(
+		        .Where(t => t.IsPublic && !t.IsGenericType && !t.IsAbstract)
+		        .SelectMany(
 			        t => (
 				        t.GetMethods().Where(
 					        m => m.GetCustomAttributes(typeof(GraphMutationMethodAttribute)).Any())
 			        ))
-		        .SelectMany(x => x)
 		        .Concat(
 			        typeof(T).Assembly.GetTypes()
-				        .Where(t => t.IsPublic)
-				        .Where(t => !t.IsGenericType)
-				        .Where(t => !t.IsAbstract)
-				        .Where(t => t.GetInterfaces().FirstOrDefault((v) =>(
-					        v.IsGenericType &&
-					        v.GetGenericTypeDefinition() == typeof(IDeleteResolver<>)
-					    )) != null)
+				        .Where(t => (
+						    t.IsPublic &&
+						    !t.IsGenericType &&
+						    !t.IsAbstract &&
+						    t.GetInterfaces().FirstOrDefault((v) =>(
+								v.IsGenericType &&
+								v.GetGenericTypeDefinition() == typeof(IDeleteResolver<>)
+							)) != null
+						))
 						.Select(t =>
 				        {
 					        var resolverType = t.GetInterfaces().First((v) => (
@@ -192,25 +191,29 @@ namespace GraphQL.Annotations.TSql
         private static IEnumerable<Type> GetQueryTypes<T>()
         {
 	        return typeof(T).Assembly.GetTypes()
-		        .Where(t => t.IsPublic)
-		        .Where(t => !t.IsGenericType)
-		        .Where(t => !t.IsAbstract)
-		        .Where(t => t.GetInterfaces().Contains(typeof(IFieldResolver)))
-		        .Where(t => t.GetInterfaces().Contains(typeof(IObjectGraphType)))
-		        .Where(t => t.IsSubclassOf(typeof(SqlFieldResolver<>).MakeGenericType(t)))
-		        .Where(t => t.GetCustomAttribute<GraphQLObjectAttribute>() != null);
+		        .Where(t => (
+				    t.IsPublic &&
+					!t.IsGenericType &&
+					!t.IsAbstract &&
+					t.GetInterfaces().Contains(typeof(IFieldResolver)) &&
+					t.GetInterfaces().Contains(typeof(IObjectGraphType)) &&
+					t.IsSubclassOf(typeof(SqlFieldResolver<>).MakeGenericType(t)) &&
+					t.GetCustomAttribute<GraphQLObjectAttribute>() != null
+				));
         }
 
         private static IEnumerable<Type> GetMutationTypes<T>()
         {
 	        return typeof(T).Assembly.GetTypes()
-		        .Where(t => t.IsPublic)
-		        .Where(t => !t.IsGenericType)
-		        .Where(t => !t.IsAbstract)
-		        .Where(t => t.GetInterfaces().Contains(typeof(IFieldResolver)))
-		        .Where(t => t.GetInterfaces().Contains(typeof(IInputObjectGraphType)))
-		        .Where(t => t.IsSubclassOf(typeof(SqlFieldResolver<>).MakeGenericType(t)))
-		        .Where(t => t.GetCustomAttribute<GraphQLInputObjectAttribute>() != null);
+		        .Where(t => (
+				    t.IsPublic &&
+					!t.IsGenericType &&
+					!t.IsAbstract &&
+					t.GetInterfaces().Contains(typeof(IFieldResolver)) &&
+					t.GetInterfaces().Contains(typeof(IInputObjectGraphType)) &&
+					t.IsSubclassOf(typeof(SqlFieldResolver<>).MakeGenericType(t)) &&
+					t.GetCustomAttribute<GraphQLInputObjectAttribute>() != null
+		        ));
         }
 
         public static TService GetService<TService>(this ResolveFieldContext context)

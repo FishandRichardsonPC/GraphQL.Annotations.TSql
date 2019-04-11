@@ -8,7 +8,7 @@ namespace GraphQL.Annotations.ToDo.Example.models
 	{
 		public Mutation(IServiceProvider serviceProvider)
 		{
-			this.AddGraphQLTSqlMutationFields<Query>(serviceProvider);
+			this.AddGraphQLTSqlMutationFields<Mutation>(serviceProvider);
 		}
 	}
 }

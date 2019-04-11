@@ -968,8 +968,7 @@ namespace GraphQL.Annotations.TSql
 
 			var sibling = siblings.First();
 			var siblingArguments = sibling.Arguments
-				.Where(v => v.Name != "_fetchCount")
-				.Where(v => v.Name != "_offset")
+				.Where(v => v.Name != "_fetchCount" && v.Name != "_offset")
 				.ToDictionary(
 					(v) => v.Name,
 					(v) => v.Value.Value
