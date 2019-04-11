@@ -40,6 +40,7 @@ This is the simpler case and will only add the object to your query type
         field name
     * `PrimaryProperty` is the field which contains the primary key. Use the property name, not the sql field name. This
         MUST return a unique value per row, it is advised that this is also indexed
+3. Add the `GraphQLObject` attribute to the class
 ### For mutable objects
 These are a little more involved documentation is in the [wiki](https://github.com/FishandRichardsonPC/GraphQL.Annotations.TSql/wiki/Mutable-Objects)
 ### Querying objects
