@@ -59,8 +59,7 @@ namespace GraphQL.Annotations.TSql.ParameterTypes
 	        this._ltParamOptions = typeof(LevenshteinParameters)
 		        .GetProperties(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.DeclaredOnly)
 		        .Select(p => Utils.FirstCharacterToLower(p.Name))
-		        .Where(v => v != "text")
-		        .Where(v => v != "begins")
+		        .Where(v => v != "text" && v != "begins")
 		        .ToArray();
         }
 
@@ -128,9 +127,7 @@ namespace GraphQL.Annotations.TSql.ParameterTypes
 			    subField++;
 
 			    var subItems = ((Dictionary<string, object>) item.Value)
-				    .Where(v => v.Key != "text")
-				    .Where(v => v.Key != "begins")
-				    .Where(v => v.Value != null)
+				    .Where(v => v.Key != "text" && v.Key != "begins" && v.Value != null)
 				    .ToList();
 
 			    var beginsValue = ((Dictionary<string, object>) item.Value)
@@ -191,8 +188,7 @@ namespace GraphQL.Annotations.TSql.ParameterTypes
 		    {
 			    var items = (Dictionary<string, object>) item.Value;
 			    var subItem = items
-				    .Where(v => v.Key != "text")
-				    .Where(v => v.Key != "begins")
+				    .Where(v => v.Key != "text" && v.Key != "begins")
 				    .First(v => v.Value != null);
 
 			    return new[]

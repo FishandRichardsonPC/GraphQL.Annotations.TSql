@@ -6,12 +6,12 @@ using GraphQL.Types;
 namespace GraphQL.Annotations.TSql.Mutation
 {
 	public class MutationResolver<T, TMutable>: IFieldResolver
-		where T: IObjectGraphType
-		where TMutable: IInputObjectGraphType, IMutationResolver<T, TMutable>, new()
+		where T: IObjectGraphType, IMutationResolver<T, TMutable>
+		where TMutable: IInputObjectGraphType, new()
 	{
-		private readonly TMutable _resolver;
+		private readonly T _resolver;
 
-		public MutationResolver(TMutable resolver)
+		public MutationResolver(T resolver)
 		{
 			this._resolver = resolver;
 		}

@@ -33,7 +33,7 @@ namespace GraphQL.Annotations.TSql
 			    if (type.IsSubclassOf(typeof(SqlFieldResolver<>).MakeGenericType(type)))
 			    {
 				    result = (IEnumerable<QueryArgument>) typeof(SqlFieldResolver<>)
-					    .MakeGenericType(type).GetMethod("GetArgumentsForType")
+					    .MakeGenericType(type).GetMethod("GetArgumentsForType")?
 					    .Invoke(null, new object[] {isRoot});
 			    }
 		    }

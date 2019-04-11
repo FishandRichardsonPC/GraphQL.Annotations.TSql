@@ -442,4 +442,4 @@ $RECYCLE.BIN/
 ### END FISH.GITIGNORE
 
 appsettings.Development.json
-!GraphQL.OData.sln.Dotsettings
+!GraphQL.Annotations.TSql.sln.DotSettings

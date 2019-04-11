@@ -41,7 +41,7 @@ namespace GraphQL.Annotations.TSql
 				.Where(v => v.Attribute.ReturnType != typeof(IdGraphType))
 				.ToList();
 			var notIdentity = fields
-				.Where(v => !v.Attribute.IsIdentityField)
+				.Where(v => !v.Attribute.SkipOnInsert)
 				.ToList();
 
 			IDictionary<string, object> result;
@@ -57,7 +57,7 @@ namespace GraphQL.Annotations.TSql
 					"DECLARE @temp_temp_temp TABLE ("
 					+ String.Join(
 						", ",
-						ids.Select(v => $"{v.Name} TEXT")
+						ids.Select(v => $"{v.Name} {SqlFieldMutator.GetSqlType(v.Property)}")
 					)
 					+ $"); MERGE [{input.Table}] AS [target] USING (SELECT "
 					+ String.Join(
@@ -109,7 +109,7 @@ namespace GraphQL.Annotations.TSql
 					queryParams.Add($"@{field.Name}", field.Value);
 				}
 
-				using (var connection = context.GetService<ISqlConnectionGetter>().GetConnection(context))
+				using (var connection = context.GetRequiredService<ISqlConnectionGetter>().GetConnection(context))
 				{
 					try
 					{
@@ -130,13 +130,60 @@ namespace GraphQL.Annotations.TSql
 				);
 			}
 
-			var resolver = context.GetService<T>();
+			var resolver = context.GetRequiredService<T>();
 			context.Arguments = result.ToDictionary(
                 (v) => fields.First(w => w.Name == v.Key).Property.Name,
                 (v) => v.Value
 			);
 
 			return (T)((List<object>)resolver.Resolve(context)).First();
+		}
+
+		private static string GetSqlType(PropertyInfo prop)
+		{
+			var attr = prop.GetCustomAttribute<SqlFieldAttribute>();
+			if (attr?.SqlType != null)
+			{
+				return attr.SqlType;
+			}
+
+			if (prop.PropertyType == typeof(Guid) || prop.PropertyType == typeof(Guid?))
+			{
+				return "uniqueidentifier";
+			}
+			else
+			{
+				return "text";
+			}
+		}
+
+		public static void Delete<TMutationType, TIdType>(
+			ResolveFieldContext context,
+			TIdType id,
+			string idProperty = "Id"
+		)
+		{
+			var prop = typeof(TMutationType).GetProperty(idProperty);
+			var attr = prop?.GetCustomAttribute<SqlFieldAttribute>();
+			var idField = attr?.DbFieldName?.Replace("]", "") ?? prop?.Name;
+
+			using (var connection = context.GetRequiredService<ISqlConnectionGetter>()
+				.GetConnection(context))
+			{
+				var resolver =
+					(ISqlFieldResolver) context.GetRequiredService(typeof(TMutationType));
+				var query = $"DELETE FROM {resolver.Table} WHERE {idField} = @id";
+				var queryParams = new {id};
+				try
+				{
+					connection.Execute(query, queryParams);
+				}
+				catch (SqlException e)
+				{
+					throw new Exception(
+						$"Failed to execute sql {query} using arguments {JsonConvert.SerializeObject(queryParams)} => {e}");
+				}
+			}
 		}
 	}
 }

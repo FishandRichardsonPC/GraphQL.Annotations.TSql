@@ -17,7 +17,7 @@ namespace GraphQL.Annotations.TSql.AspNetCore
 
         public object GetService(Type serviceType)
         {
-            return this._context.RequestServices.GetService(serviceType);
+	        return this._context.RequestServices.GetService(serviceType);
         }
 
         public HttpContext GetHttpContext()

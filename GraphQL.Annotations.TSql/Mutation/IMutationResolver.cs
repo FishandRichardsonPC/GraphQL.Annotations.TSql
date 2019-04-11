@@ -3,8 +3,8 @@
 namespace GraphQL.Annotations.TSql.Mutation
 {
 	public interface IMutationResolver<out T, in TMutable>
-		where T: IObjectGraphType
-		where TMutable: IInputObjectGraphType
+		where T: IObjectGraphType, IMutationResolver<T, TMutable>
+		where TMutable: IInputObjectGraphType, new()
 	{
 		T Mutate(ResolveFieldContext context, TMutable input);
 	}

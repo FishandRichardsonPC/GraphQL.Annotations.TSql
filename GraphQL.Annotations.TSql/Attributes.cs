@@ -22,7 +22,7 @@ namespace GraphQL.Annotations.TSql
         public string ReverseTransform { get; set; }
         public bool SkipBuiltins { get; set; }
         public bool IsTextField { get; set; }
-        public bool IsIdentityField { get; set; }
+        public bool SkipOnInsert { get; set; }
         public bool IsAggregation { get; set; }
     }
 
@@ -56,8 +56,9 @@ namespace GraphQL.Annotations.TSql
         public string ReverseTransform { get; set; }
         public bool SkipBuiltins { get; set; }
         public bool IsTextField { get; set; }
-        public bool IsIdentityField { get; set; }
+        public bool SkipOnInsert { get; set; }
         public bool IsAggregation { get; } = false;
+        public string SqlType { get; set; }
     }
 
     public interface ISqlFieldAttribute
@@ -74,7 +75,7 @@ namespace GraphQL.Annotations.TSql
         /// <summary>Is this a TEXT field (instead of a VARCHAR) only applies to strings</summary>
         bool IsTextField { get; }
         /// <summary>Is this an identity field in the database, Make sure this is the PROPERTY name of the primary key</summary>
-        bool IsIdentityField { get; }
+        bool SkipOnInsert { get; }
         /// <summary>Is this an aggregation field. Internal use only</summary>
         bool IsAggregation { get; }
     }

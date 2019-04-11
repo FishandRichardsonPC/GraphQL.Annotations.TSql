@@ -11,8 +11,7 @@ namespace GraphQL.Annotations.TSql.Generators
         public IEnumerable<string> GetFields(BatchItem batch)
         {
             var result = batch.Fields
-                .Where(v => !v.IsAggregation)
-                .Where(v => !v.IsIdentifierOnly)
+                .Where(v => !v.IsAggregation && !v.IsIdentifierOnly)
                 .Select(
                     v =>
                     {

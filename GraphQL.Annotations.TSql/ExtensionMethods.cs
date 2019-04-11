@@ -1,10 +1,17 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
+using GraphQL.Annotations.Attributes;
 using GraphQL.Annotations.TSql.Generators;
+using GraphQL.Annotations.TSql.Mutation;
+using GraphQL.Annotations.TSql.Query;
 using GraphQL.Instrumentation;
+using GraphQL.Resolvers;
 using GraphQL.Types;
+using Humanizer;
 using Microsoft.Extensions.DependencyInjection;
+using Type = System.Type;
 
 namespace GraphQL.Annotations.TSql
 {
@@ -20,18 +27,208 @@ namespace GraphQL.Annotations.TSql
 	    };
 
         // ReSharper disable once InconsistentNaming
-        public static IServiceCollection AddGraphQLTSql(this IServiceCollection services)
+        public static IServiceCollection AddGraphQLTSql<TQuery, TMutation>(this IServiceCollection services)
         {
             services.AddSingleton<AggregationSqlFieldGenerator>();
             services.AddSingleton<SimpleAggregationSqlFieldGenerator>();
             services.AddSingleton<StandardSqlFieldGenerator>();
 
+            var addSingleton = typeof(ServiceCollectionServiceExtensions)
+                .GetMethods()
+                .First(v => v.Name == "AddSingleton" && v.GetGenericArguments().Length == 1 && v.GetParameters().Length == 1);
+
+            foreach (var type in ExtensionMethods.GetMutationTypes<TMutation>())
+            {
+                addSingleton
+                    .MakeGenericMethod(type)
+                    .Invoke(services, new object[] { services });
+            }
+
+            foreach (var type in ExtensionMethods.GetMutationMethodInfos<TMutation>().Select((v) => v.DeclaringType).Distinct())
+            {
+	            addSingleton
+		            .MakeGenericMethod(type)
+		            .Invoke(services, new object[] { services });
+	            addSingleton
+		            .MakeGenericMethod(typeof(MethodResolver<>).MakeGenericType(type))
+		            .Invoke(services, new object[] { services });
+            }
+
+            foreach (var type in ExtensionMethods.GetQueryTypes<TQuery>())
+            {
+	            addSingleton
+		            .MakeGenericMethod(type)
+		            .Invoke(services, new object[] { services });
+	            addSingleton
+		            .MakeGenericMethod(typeof(MethodResolver<>).MakeGenericType(type))
+		            .Invoke(services, new object[] { services });
+
+	            var mutationResolverArgs = type.GetInterfaces()
+		            .FirstOrDefault(v => v.IsGenericType && v.GetGenericTypeDefinition() == typeof(IMutationResolver<,>))?
+		            .GenericTypeArguments;
+	            if (mutationResolverArgs != null)
+	            {
+		            addSingleton
+			            .MakeGenericMethod(
+				            typeof(MutationResolver<,>)
+					            .MakeGenericType(mutationResolverArgs)
+			            )
+			            .Invoke(services, new object[] {services});
+	            }
+            }
+
             return services;
+        }
+
+        // ReSharper disable once InconsistentNaming
+        public static ObjectGraphType AddGraphQLTSqlQueryFields<T>(
+	        this ObjectGraphType graphType,
+	        IServiceProvider serviceProvider
+        )
+        {
+	        foreach (var type in ExtensionMethods.GetQueryTypes<T>())
+	        {
+		        var field = new FieldType
+		        {
+			        Name = type.Name.Pluralize(),
+			        Arguments = new QueryArguments(Utils.GetArgumentsForType(type, true)),
+			        Type = typeof(ListGraphType<>).MakeGenericType(type),
+			        Resolver = (IFieldResolver)serviceProvider.GetRequiredService(type)
+		        };
+		        graphType.AddField(field);
+	        }
+
+	        graphType.AddField(
+		        new FieldType
+		        {
+			        Name = "_count",
+			        Type = typeof(IntGraphType),
+			        Resolver = new CountResolver(graphType)
+		        });
+
+	        return graphType;
+        }
+
+        // ReSharper disable once InconsistentNaming
+        public static ObjectGraphType AddGraphQLTSqlMutationFields<T>(
+	        this ObjectGraphType graphType,
+	        IServiceProvider serviceProvider
+        )
+        {
+	        foreach (var type in ExtensionMethods.GetQueryTypes<T>())
+	        {
+		        var typeArgs = type.GetInterfaces()
+			        .FirstOrDefault(v => v.IsGenericType && v.GetGenericTypeDefinition() == typeof(IMutationResolver<,>))?
+			        .GenericTypeArguments;
+		        if (typeArgs != null)
+		        {
+			        var name = Utils.FirstCharacterToLower(typeArgs[0].Name);
+			        var field = new FieldType
+			        {
+				        Name = name,
+				        Arguments = new QueryArguments(
+					        new QueryArgument(typeof(NonNullGraphType<>).MakeGenericType(typeArgs[1]))
+					        {
+						        Name = name
+					        }
+				        ),
+				        Type = type.GetMethod("Mutate")?.ReturnType,
+				        Resolver = (IFieldResolver) serviceProvider.GetRequiredService(
+					        typeof(MutationResolver<,>).MakeGenericType(typeArgs)
+				        )
+			        };
+			        graphType.AddField(field);
+		        }
+	        }
+
+	        foreach (var method in ExtensionMethods.GetMutationMethodInfos<T>())
+	        {
+		        graphType.AddField(MethodResolver<T>.GetFieldType(
+			        method,
+			        method.GetCustomAttribute<GraphMutationMethodAttribute>(),
+			        serviceProvider
+		        ));
+	        }
+
+	        return graphType;
+        }
+
+        private static IEnumerable<MethodInfo> GetMutationMethodInfos<T>()
+        {
+	        return typeof(T).Assembly.GetTypes()
+		        .Where(t => t.IsPublic && !t.IsGenericType && !t.IsAbstract)
+		        .SelectMany(
+			        t => (
+				        t.GetMethods().Where(
+					        m => m.GetCustomAttributes(typeof(GraphMutationMethodAttribute)).Any())
+			        ))
+		        .Concat(
+			        typeof(T).Assembly.GetTypes()
+				        .Where(t => (
+						    t.IsPublic &&
+						    !t.IsGenericType &&
+						    !t.IsAbstract &&
+						    t.GetInterfaces().FirstOrDefault((v) =>(
+								v.IsGenericType &&
+								v.GetGenericTypeDefinition() == typeof(IDeleteResolver<>)
+							)) != null
+						))
+						.Select(t =>
+				        {
+					        var resolverType = t.GetInterfaces().First((v) => (
+						        v.IsGenericType
+						        && v.GetGenericTypeDefinition() == typeof(IDeleteResolver<>)
+					        ));
+					        return t.GetMethod("Delete", new []
+					        {
+						        typeof(ResolveFieldContext),
+						        resolverType.GetGenericArguments()[0]
+					        });
+				        })
+		        );
+        }
+
+        private static IEnumerable<Type> GetQueryTypes<T>()
+        {
+	        return typeof(T).Assembly.GetTypes()
+		        .Where(t => (
+				    t.IsPublic &&
+					!t.IsGenericType &&
+					!t.IsAbstract &&
+					t.GetInterfaces().Contains(typeof(IFieldResolver)) &&
+					t.GetInterfaces().Contains(typeof(IObjectGraphType)) &&
+					t.IsSubclassOf(typeof(SqlFieldResolver<>).MakeGenericType(t)) &&
+					t.GetCustomAttribute<GraphQLObjectAttribute>() != null
+				));
+        }
+
+        private static IEnumerable<Type> GetMutationTypes<T>()
+        {
+	        return typeof(T).Assembly.GetTypes()
+		        .Where(t => (
+				    t.IsPublic &&
+					!t.IsGenericType &&
+					!t.IsAbstract &&
+					t.GetInterfaces().Contains(typeof(IFieldResolver)) &&
+					t.GetInterfaces().Contains(typeof(IInputObjectGraphType)) &&
+					t.IsSubclassOf(typeof(SqlFieldResolver<>).MakeGenericType(t)) &&
+					t.GetCustomAttribute<GraphQLInputObjectAttribute>() != null
+		        ));
         }
 
         public static TService GetService<TService>(this ResolveFieldContext context)
         {
-            return ((IServiceProvider) context.UserContext).GetService<TService>();
+	        return ((IServiceProvider) context.UserContext).GetService<TService>();
+        }
+
+        public static TService GetRequiredService<TService>(this ResolveFieldContext context)
+        {
+	        return ((IServiceProvider) context.UserContext).GetRequiredService<TService>();
+        }
+
+        public static object GetRequiredService(this ResolveFieldContext context, Type type)
+        {
+	        return ((IServiceProvider) context.UserContext).GetRequiredService(type);
         }
 
         public static void EnrichWithTSqlTracing(this ExecutionResult result)
