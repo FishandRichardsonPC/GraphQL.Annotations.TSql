@@ -77,7 +77,7 @@ namespace GraphQL.Annotations.TSql
 	            }
             }
 
-            foreach (var type in ExtensionMethods.GetQueryMethodInfos<TMutation>().Select((v) => v.DeclaringType).Distinct())
+            foreach (var type in ExtensionMethods.GetQueryMethodInfos<TQuery>().Select((v) => v.DeclaringType).Distinct())
             {
 	            addSingleton
 		            .MakeGenericMethod(type)
@@ -106,6 +106,15 @@ namespace GraphQL.Annotations.TSql
 			        Resolver = (IFieldResolver)serviceProvider.GetRequiredService(type)
 		        };
 		        graphType.AddField(field);
+	        }
+
+	        foreach (var method in ExtensionMethods.GetQueryMethodInfos<T>())
+	        {
+		        graphType.AddField(MethodResolver<T>.GetFieldType(
+			        method,
+			        method.GetCustomAttribute<GraphMutationMethodAttribute>(),
+			        serviceProvider
+		        ));
 	        }
 
 	        graphType.AddField(
