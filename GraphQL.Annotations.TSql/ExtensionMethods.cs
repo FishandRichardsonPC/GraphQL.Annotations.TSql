@@ -191,29 +191,51 @@ namespace GraphQL.Annotations.TSql
         private static IEnumerable<Type> GetQueryTypes<T>()
         {
 	        return typeof(T).Assembly.GetTypes()
-		        .Where(t => (
-				    t.IsPublic &&
-					!t.IsGenericType &&
-					!t.IsAbstract &&
-					t.GetInterfaces().Contains(typeof(IFieldResolver)) &&
-					t.GetInterfaces().Contains(typeof(IObjectGraphType)) &&
-					t.IsSubclassOf(typeof(SqlFieldResolver<>).MakeGenericType(t)) &&
-					t.GetCustomAttribute<GraphQLObjectAttribute>() != null
-				));
+		        .Where(t =>
+		        {
+			        try
+			        {
+				        return (
+					        t.IsPublic
+					        && !t.IsGenericType
+					        && !t.IsAbstract
+					        && t.GetInterfaces().Contains(typeof(IFieldResolver))
+					        && t.GetInterfaces().Contains(typeof(IObjectGraphType))
+					        && t.IsSubclassOf(typeof(SqlFieldResolver<>).MakeGenericType(t))
+					        && t.GetCustomAttribute<GraphQLObjectAttribute>() != null
+				        );
+			        }
+			        catch (ArgumentException)
+			        {
+				        // This is caused by MakeGenericType when the type would violate the SqlFieldResolver type requirements
+				        return false;
+			        }
+		        });
         }
 
         private static IEnumerable<Type> GetMutationTypes<T>()
         {
 	        return typeof(T).Assembly.GetTypes()
-		        .Where(t => (
-				    t.IsPublic &&
-					!t.IsGenericType &&
-					!t.IsAbstract &&
-					t.GetInterfaces().Contains(typeof(IFieldResolver)) &&
-					t.GetInterfaces().Contains(typeof(IInputObjectGraphType)) &&
-					t.IsSubclassOf(typeof(SqlFieldResolver<>).MakeGenericType(t)) &&
-					t.GetCustomAttribute<GraphQLInputObjectAttribute>() != null
-		        ));
+		        .Where(t =>
+		        {
+			        try
+			        {
+				        return (
+					        t.IsPublic
+					        && !t.IsGenericType
+					        && !t.IsAbstract
+					        && t.GetInterfaces().Contains(typeof(IFieldResolver))
+					        && t.GetInterfaces().Contains(typeof(IInputObjectGraphType))
+					        && t.IsSubclassOf(typeof(SqlFieldResolver<>).MakeGenericType(t))
+					        && t.GetCustomAttribute<GraphQLInputObjectAttribute>() != null
+				        );
+			        }
+			        catch (ArgumentException)
+			        {
+				        // This is caused by MakeGenericType when the type would violate the SqlFieldResolver type requirements
+				        return false;
+			        }
+		        });
         }
 
         public static TService GetService<TService>(this ResolveFieldContext context)
