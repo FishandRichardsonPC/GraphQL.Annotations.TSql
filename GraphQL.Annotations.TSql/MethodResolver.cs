@@ -187,7 +187,7 @@ namespace GraphQL.Annotations.TSql
 				method.ReturnType.IsGraphType() ? method.ReturnType : (
 					method.ReturnType == typeof(void) ?
 						typeof(VoidType) :
-						method.ReturnType.GetGraphTypeFromType()
+						method.ReturnType.ToGraphType()
 				)
 			);
 			type.Resolver = (IFieldResolver)serviceProvider.GetRequiredService(
