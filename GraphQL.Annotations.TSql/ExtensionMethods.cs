@@ -77,6 +77,16 @@ namespace GraphQL.Annotations.TSql
 	            }
             }
 
+            foreach (var type in ExtensionMethods.GetQueryMethodInfos<TMutation>().Select((v) => v.DeclaringType).Distinct())
+            {
+	            addSingleton
+		            .MakeGenericMethod(type)
+		            .Invoke(services, new object[] { services });
+	            addSingleton
+		            .MakeGenericMethod(typeof(MethodResolver<>).MakeGenericType(type))
+		            .Invoke(services, new object[] { services });
+            }
+
             return services;
         }
 
@@ -151,6 +161,41 @@ namespace GraphQL.Annotations.TSql
 	        }
 
 	        return graphType;
+        }
+
+        private static IEnumerable<MethodInfo> GetQueryMethodInfos<T>()
+        {
+	        return typeof(T).Assembly.GetTypes()
+		        .Where(t => t.IsPublic && !t.IsGenericType && !t.IsAbstract)
+		        .SelectMany(
+			        t => (
+				        t.GetMethods().Where(
+					        m => m.GetCustomAttributes(typeof(GraphQueryMethodAttribute)).Any())
+			        ))
+		        .Concat(
+			        typeof(T).Assembly.GetTypes()
+				        .Where(t => (
+					        t.IsPublic &&
+					        !t.IsGenericType &&
+					        !t.IsAbstract &&
+					        t.GetInterfaces().FirstOrDefault((v) =>(
+						        v.IsGenericType &&
+						        v.GetGenericTypeDefinition() == typeof(IDeleteResolver<>)
+					        )) != null
+				        ))
+				        .Select(t =>
+				        {
+					        var resolverType = t.GetInterfaces().First((v) => (
+						        v.IsGenericType
+						        && v.GetGenericTypeDefinition() == typeof(IDeleteResolver<>)
+					        ));
+					        return t.GetMethod("Delete", new []
+					        {
+						        typeof(ResolveFieldContext),
+						        resolverType.GetGenericArguments()[0]
+					        });
+				        })
+		        );
         }
 
         private static IEnumerable<MethodInfo> GetMutationMethodInfos<T>()
