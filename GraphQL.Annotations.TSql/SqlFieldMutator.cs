@@ -3,35 +3,40 @@ using System.Collections.Generic;
 using System.Data.SqlClient;
 using System.Linq;
 using System.Reflection;
+using System.Text.Json;
 using Dapper;
 using GraphQL.Types;
-using Newtonsoft.Json;
 
 namespace GraphQL.Annotations.TSql
 {
 	public static class SqlFieldMutator
 	{
-		private static BindingFlags _bindingFlags = BindingFlags.IgnoreCase | BindingFlags.Public | BindingFlags.Instance;
+		private static BindingFlags _bindingFlags =
+			BindingFlags.IgnoreCase | BindingFlags.Public | BindingFlags.Instance;
 
-		public static T Mutate<T, TMutable>(ResolveFieldContext context, TMutable input)
-			where TMutable: SqlFieldResolver<TMutable>, new()
-			where T: SqlFieldResolver<T>, new()
+		public static T Mutate<T, TMutable>(IResolveFieldContext context, TMutable input)
+			where TMutable : SqlFieldResolver<TMutable>, new()
+			where T : SqlFieldResolver<T>, new()
 		{
-            var fields = ((IDictionary<string, object>)context.Arguments.First().Value)
-				.Select(v =>
-				{
-					var prop = typeof(TMutable).GetProperty(v.Key, SqlFieldMutator._bindingFlags);
-					var attr = (ISqlFieldAttribute) prop.GetCustomAttribute<SqlGraphQLFieldAttribute>()
-						?? prop.GetCustomAttribute<SqlFieldAttribute>();
-					return new
+			var fields = ((IDictionary<string, object>) context.Arguments.First().Value)
+				.Select(
+					v =>
 					{
-						Property = prop,
-						Attribute = attr,
-						Name = attr?.DbFieldName?.Replace("]", "") ?? prop?.Name,
-						Value = prop?.GetValue(input)
-					};
-				})
-				.Where(v => (v.Property ?? (object)v.Attribute ?? v.Name) != null)
+						var prop = typeof(TMutable).GetProperty(
+							v.Key,
+							SqlFieldMutator._bindingFlags);
+						var attr =
+							(ISqlFieldAttribute) prop.GetCustomAttribute<SqlGraphQLFieldAttribute>()
+							?? prop.GetCustomAttribute<SqlFieldAttribute>();
+						return new
+						{
+							Property = prop,
+							Attribute = attr,
+							Name = attr?.DbFieldName?.Replace("]", "") ?? prop?.Name,
+							Value = prop?.GetValue(input)
+						};
+					})
+				.Where(v => (v.Property ?? (object) v.Attribute ?? v.Name) != null)
 				.ToList();
 
 			var ids = fields
@@ -87,17 +92,18 @@ namespace GraphQL.Annotations.TSql
 					+ ") OUTPUT "
 					+ String.Join(
 						", ",
-						ids.Select(v =>
-						{
-							if (String.IsNullOrEmpty(v.Attribute.Transform))
+						ids.Select(
+							v =>
 							{
-								return $"[INSERTED].[{v.Name}]";
-							}
-							else
-							{
-								return String.Format(v.Attribute.Transform, "INSERTED", v.Name);
-							}
-						})
+								if (String.IsNullOrEmpty(v.Attribute.Transform))
+								{
+									return $"[INSERTED].[{v.Name}]";
+								}
+								else
+								{
+									return String.Format(v.Attribute.Transform, "INSERTED", v.Name);
+								}
+							})
 					)
 					+ " INTO @temp_temp_temp; SELECT * FROM @temp_temp_temp"
 				);
@@ -109,16 +115,19 @@ namespace GraphQL.Annotations.TSql
 					queryParams.Add($"@{field.Name}", field.Value);
 				}
 
-				using (var connection = context.GetRequiredService<ISqlConnectionGetter>().GetConnection(context))
+				using (var connection = context.GetRequiredService<ISqlConnectionGetter>()
+					.GetConnection(context))
 				{
 					try
 					{
-						result = (IDictionary<string, object>) connection.QueryFirst(query, queryParams);
+						result = (IDictionary<string, object>) connection.QueryFirst(
+							query,
+							queryParams);
 					}
 					catch (SqlException e)
 					{
 						throw new Exception(
-							$"Failed to execute sql {query} using arguments {JsonConvert.SerializeObject(queryParams)} => {e}");
+							$"Failed to execute sql {query} using arguments {JsonSerializer.Serialize(queryParams)} => {e}");
 					}
 				}
 			}
@@ -131,12 +140,14 @@ namespace GraphQL.Annotations.TSql
 			}
 
 			var resolver = context.GetRequiredService<T>();
-			context.Arguments = result.ToDictionary(
-                (v) => fields.First(w => w.Name == v.Key).Property.Name,
-                (v) => v.Value
-			);
+			context.Arguments.Clear();
 
-			return (T)((List<object>)resolver.Resolve(context)).First();
+			foreach (var (key, value) in result)
+			{
+				context.Arguments.Add(fields.First(w => w.Name == key).Property.Name, value);
+			}
+
+			return (T) ((List<object>) resolver.Resolve(context)).First();
 		}
 
 		private static string GetSqlType(PropertyInfo prop)
@@ -158,7 +169,7 @@ namespace GraphQL.Annotations.TSql
 		}
 
 		public static void Delete<TMutationType, TIdType>(
-			ResolveFieldContext context,
+			IResolveFieldContext context,
 			TIdType id,
 			string idProperty = "Id"
 		)
@@ -181,7 +192,7 @@ namespace GraphQL.Annotations.TSql
 				catch (SqlException e)
 				{
 					throw new Exception(
-						$"Failed to execute sql {query} using arguments {JsonConvert.SerializeObject(queryParams)} => {e}");
+						$"Failed to execute sql {query} using arguments {JsonSerializer.Serialize(queryParams)} => {e}");
 				}
 			}
 		}

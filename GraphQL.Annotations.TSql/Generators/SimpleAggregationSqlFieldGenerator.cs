@@ -40,7 +40,7 @@ namespace GraphQL.Annotations.TSql.Generators
 
         public IEnumerable<string> GetHaving<T>(
             BatchItem batch,
-            ResolveFieldContext context,
+            IResolveFieldContext context,
             SqlFieldResolver<T> resolver,
             bool isFirst = true
         ) where T: SqlFieldResolver<T>, new()
@@ -78,7 +78,7 @@ namespace GraphQL.Annotations.TSql.Generators
 
         public IEnumerable<WhereItem> GetWhere<T>(
             BatchItem batch,
-            ResolveFieldContext context,
+            IResolveFieldContext context,
             SqlFieldResolver<T> resolver,
             bool isFirst = true
         ) where T: SqlFieldResolver<T>, new()
@@ -90,7 +90,7 @@ namespace GraphQL.Annotations.TSql.Generators
 
         public string BuildQuery<T>(
             BatchItem batch,
-            ResolveFieldContext context,
+            IResolveFieldContext context,
             SqlFieldResolver<T> resolver,
             string previousFrom,
             string joinTo
@@ -282,7 +282,7 @@ namespace GraphQL.Annotations.TSql.Generators
 			return result;
 		}
 
-        public void GetExtraParams<T>(BatchItem batch, ResolveFieldContext context, SqlFieldResolver<T> resolver, Dictionary<string, DbValue> parameters) where T : SqlFieldResolver<T>, new()
+        public void GetExtraParams<T>(BatchItem batch, IResolveFieldContext context, SqlFieldResolver<T> resolver, Dictionary<string, DbValue> parameters) where T : SqlFieldResolver<T>, new()
         {
             foreach (var (dbField, paramValue) in this.GetHavingEnumerable(batch, context))
             {
@@ -338,7 +338,7 @@ namespace GraphQL.Annotations.TSql.Generators
             }
         }
 
-        private IEnumerable<Tuple<DbField, object>> GetHavingEnumerable(BatchItem batch, ResolveFieldContext context)
+        private IEnumerable<Tuple<DbField, object>> GetHavingEnumerable(BatchItem batch, IResolveFieldContext context)
         {
             return context.Arguments
                 .Select(v => new

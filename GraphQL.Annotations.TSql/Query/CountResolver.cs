@@ -17,7 +17,7 @@ namespace GraphQL.Annotations.TSql.Query
             this._query = query;
         }
 
-		public int? Resolve(ResolveFieldContext context)
+		public int? Resolve(IResolveFieldContext context)
 		{
 			var parent = CountResolver.GetParentNode(context.Document, context.FieldAst);
 			var siblings = parent.Children
@@ -83,7 +83,7 @@ namespace GraphQL.Annotations.TSql.Query
 				.FirstOrDefault(result => result != null);
 		}
 
-		object IFieldResolver.Resolve(ResolveFieldContext context)
+		object IFieldResolver.Resolve(IResolveFieldContext context)
 		{
 			return this.Resolve(context);
 		}

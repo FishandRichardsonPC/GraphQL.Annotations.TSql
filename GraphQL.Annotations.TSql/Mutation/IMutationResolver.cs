@@ -6,6 +6,6 @@ namespace GraphQL.Annotations.TSql.Mutation
 		where T: IObjectGraphType, IMutationResolver<T, TMutable>
 		where TMutable: IInputObjectGraphType, new()
 	{
-		T Mutate(ResolveFieldContext context, TMutable input);
+		T Mutate(IResolveFieldContext context, TMutable input);
 	}
 }

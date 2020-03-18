@@ -56,7 +56,7 @@ namespace GraphQL.Annotations.TSql
 			this._resolver = resolver;
 		}
 
-		public object Resolve(ResolveFieldContext context)
+		public object Resolve(IResolveFieldContext context)
 		{
 			var fieldName = context.FieldName;
 			fieldName = new Regex("^" + typeof(TResolver).Name + "_", RegexOptions.IgnoreCase).Replace(
@@ -76,7 +76,7 @@ namespace GraphQL.Annotations.TSql
 				method.GetParameters().Select(
 					v =>
 					{
-						if (v.ParameterType == typeof(ResolveFieldContext))
+						if (v.ParameterType == typeof(IResolveFieldContext))
 						{
 							return context;
 						}
@@ -157,7 +157,7 @@ namespace GraphQL.Annotations.TSql
 				Utils.FirstCharacterToLower(method.DeclaringType?.Name);
 			type.Arguments = new QueryArguments(
 				method.GetParameters()
-					.Where(p => p.ParameterType != typeof(ResolveFieldContext))
+					.Where(p => p.ParameterType != typeof(IResolveFieldContext))
 					.Select(p =>
 					{
 						var attr = p.GetCustomAttribute<GraphParameterAttribute>();

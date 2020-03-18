@@ -200,7 +200,7 @@ namespace GraphQL.Annotations.TSql
 					        ));
 					        return t.GetMethod("Delete", new []
 					        {
-						        typeof(ResolveFieldContext),
+						        typeof(IResolveFieldContext),
 						        resolverType.GetGenericArguments()[0]
 					        });
 				        })
@@ -235,7 +235,7 @@ namespace GraphQL.Annotations.TSql
 					        ));
 					        return t.GetMethod("Delete", new []
 					        {
-						        typeof(ResolveFieldContext),
+						        typeof(IResolveFieldContext),
 						        resolverType.GetGenericArguments()[0]
 					        });
 				        })
@@ -292,17 +292,17 @@ namespace GraphQL.Annotations.TSql
 		        });
         }
 
-        public static TService GetService<TService>(this ResolveFieldContext context)
+        public static TService GetService<TService>(this IResolveFieldContext context)
         {
 	        return ((IServiceProvider) context.UserContext).GetService<TService>();
         }
 
-        public static TService GetRequiredService<TService>(this ResolveFieldContext context)
+        public static TService GetRequiredService<TService>(this IResolveFieldContext context)
         {
 	        return ((IServiceProvider) context.UserContext).GetRequiredService<TService>();
         }
 
-        public static object GetRequiredService(this ResolveFieldContext context, Type type)
+        public static object GetRequiredService(this IResolveFieldContext context, Type type)
         {
 	        return ((IServiceProvider) context.UserContext).GetRequiredService(type);
         }

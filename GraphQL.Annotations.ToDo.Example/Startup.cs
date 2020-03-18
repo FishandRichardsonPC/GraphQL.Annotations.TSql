@@ -9,14 +9,15 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SpaServices.ReactDevelopmentServer;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace GraphQL.Annotations.ToDo.Example
 {
 	public class Startup
 	{
-		private readonly IHostingEnvironment _environment;
+		private readonly IWebHostEnvironment _environment;
 
-		public Startup(IConfiguration configuration, IHostingEnvironment environment)
+		public Startup(IConfiguration configuration, IWebHostEnvironment environment)
 		{
 			this._environment = environment;
 			this.Configuration = configuration;
@@ -27,7 +28,7 @@ namespace GraphQL.Annotations.ToDo.Example
 		// This method gets called by the runtime. Use this method to add services to the container.
 		public void ConfigureServices(IServiceCollection services)
 		{
-			services.AddMvc().SetCompatibilityVersion(CompatibilityVersion.Version_2_2);
+			services.AddMvc().SetCompatibilityVersion(CompatibilityVersion.Version_3_0);
 
 			// In production, the React files will be served from this directory
 			services.AddSpaStaticFiles(
@@ -50,7 +51,7 @@ namespace GraphQL.Annotations.ToDo.Example
 		}
 
 		// This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
-		public void Configure(IApplicationBuilder app, IHostingEnvironment env)
+		public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
 		{
 			if (env.IsDevelopment())
 			{
@@ -67,16 +68,8 @@ namespace GraphQL.Annotations.ToDo.Example
 			app.UseStaticFiles();
 			app.UseSpaStaticFiles();
 
-			app.UseGraphQL<ToDoSchema>("/graphql");
+			app.UseGraphQL<ToDoSchema>();
 			app.UseGraphQLPlayground(new GraphQLPlaygroundOptions());
-
-			app.UseMvc(
-				routes =>
-				{
-					routes.MapRoute(
-						"default",
-						"{controller}/{action=Index}/{id?}");
-				});
 
 			app.UseSpa(
 				spa =>

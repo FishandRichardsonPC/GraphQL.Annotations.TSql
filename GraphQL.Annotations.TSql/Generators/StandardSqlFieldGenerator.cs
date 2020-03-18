@@ -10,7 +10,7 @@ namespace GraphQL.Annotations.TSql.Generators
 		private IEnumerable<string> GetTables<T>(
 		    BatchItem batch,
 		    string joinTo,
-		    ResolveFieldContext context,
+		    IResolveFieldContext context,
 		    SqlFieldResolver<T> resolver
 		) where T : SqlFieldResolver<T>, new()
 		{
@@ -83,7 +83,7 @@ namespace GraphQL.Annotations.TSql.Generators
 		}
 
         public string BuildQuery<T>(BatchItem batch,
-            ResolveFieldContext context,
+            IResolveFieldContext context,
             SqlFieldResolver<T> resolver,
             string previousFrom = null,
             string joinTo = null

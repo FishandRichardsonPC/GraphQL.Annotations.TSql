@@ -16,7 +16,7 @@ namespace GraphQL.Annotations.TSql.Mutation
 			this._resolver = resolver;
 		}
 
-		public object Resolve(ResolveFieldContext context)
+		public object Resolve(IResolveFieldContext context)
 		{
 			return this._resolver.Mutate(
 				context,

@@ -5,6 +5,7 @@ using System.Data;
 using System.Data.SqlClient;
 using System.Linq;
 using System.Reflection;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using GraphQL.Annotations.TSql.Generators;
 using GraphQL.Annotations.TSql.ParameterTypes;
@@ -13,21 +14,20 @@ using GraphQL.Annotations.TSql.Query;
 using GraphQL.Language.AST;
 using GraphQL.Resolvers;
 using GraphQL.Types;
-using Newtonsoft.Json;
 
 namespace GraphQL.Annotations.TSql
 {
-    public interface ISqlConnectionGetter
-    {
-        SqlConnection GetConnection(ResolveFieldContext context);
-    }
+	public interface ISqlConnectionGetter
+	{
+		SqlConnection GetConnection(IResolveFieldContext context);
+	}
 
 	public interface ISqlFieldResolver
 	{
 		BatchItem GetBatch(
 			IDictionary<string, Field> ipSubFields,
 			IDictionary<string, object> arguments,
-			ResolveFieldContext context,
+			IResolveFieldContext context,
 			PropertyInfo srcProperty = null
 		);
 
@@ -62,8 +62,13 @@ namespace GraphQL.Annotations.TSql
 			{typeof(TimeSpan), typeof(IsoTimeSpanGraphType)}
 		};
 
-		internal static readonly LazyDictionary<Type, ISqlFieldResolver> Resolvers = new LazyDictionary<Type, ISqlFieldResolver>((t) => (ISqlFieldResolver)Activator.CreateInstance(t));
-		internal static readonly LazyDictionary<Type, ISqlParameterType> Parameters = new LazyDictionary<Type, ISqlParameterType>((t) => (ISqlParameterType)Activator.CreateInstance(t));
+		internal static readonly LazyDictionary<Type, ISqlFieldResolver> Resolvers =
+			new LazyDictionary<Type, ISqlFieldResolver>(
+				(t) => (ISqlFieldResolver) Activator.CreateInstance(t));
+
+		internal static readonly LazyDictionary<Type, ISqlParameterType> Parameters =
+			new LazyDictionary<Type, ISqlParameterType>(
+				(t) => (ISqlParameterType) Activator.CreateInstance(t));
 	}
 
 	public abstract class SqlFieldResolver<T> : ObjectGraphType<T>,
@@ -72,90 +77,97 @@ namespace GraphQL.Annotations.TSql
 		ICountResolver
 		where T : SqlFieldResolver<T>, new()
 	{
-	    [SqlGraphQLField(
-	        DbFieldName = "",
-	        Transform = "count(*)",
-	        IsAggregation = true,
-	        Description = "Count of matching records, will cause the query to be grouped by all requested fields unless the _groupBy parameter is provided"
-        )]
-	    // ReSharper disable once InconsistentNaming - The _ notation is to avoid naming conflicts with non system fields
-	    public int? _count { get; set; }
+		[SqlGraphQLField(
+			DbFieldName = "",
+			Transform = "count(*)",
+			IsAggregation = true,
+			Description =
+				"Count of matching records, will cause the query to be grouped by all requested fields unless the _groupBy parameter is provided"
+		)]
+		// ReSharper disable once InconsistentNaming - The _ notation is to avoid naming conflicts with non system fields
+		public int? _count { get; set; }
 
-	    public abstract string Table { get; }
-	    public abstract string DefaultOrder { get; }
-	    public abstract string PrimaryProperty { get; }
+		public abstract string Table { get; }
+		public abstract string DefaultOrder { get; }
+		public abstract string PrimaryProperty { get; }
 
 		public BatchItem LastBatchItem { get; private set; }
 
-		private const BindingFlags BindingFlags = System.Reflection.BindingFlags.IgnoreCase | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance;
+		private const BindingFlags BindingFlags = System.Reflection.BindingFlags.IgnoreCase
+			| System.Reflection.BindingFlags.Public
+			| System.Reflection.BindingFlags.Instance;
 
-		private static ConcurrentDictionary<Type, ConcurrentDictionary<string, IFieldType>> fieldCache = new ConcurrentDictionary<Type, ConcurrentDictionary<string, IFieldType>>();
+		private static ConcurrentDictionary<Type, ConcurrentDictionary<string, IFieldType>>
+			fieldCache = new ConcurrentDictionary<Type, ConcurrentDictionary<string, IFieldType>>();
 
 		public SqlFieldResolver()
 		{
 			var type = this.GetType();
 
-		    if (!SqlFieldResolver<T>.fieldCache.ContainsKey(type))
-		    {
-		        SqlFieldResolver<T>.fieldCache[type] = new ConcurrentDictionary<string, IFieldType>();
-		        foreach (var method in type
-		            .GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance)
-		            .Where(m => !m.IsSpecialName))
-		        {
-		            var funcAttr = method.GetCustomAttribute<SqlGraphQLFuncAttribute>();
+			if (!SqlFieldResolver<T>.fieldCache.ContainsKey(type))
+			{
+				SqlFieldResolver<T>.fieldCache[type] =
+					new ConcurrentDictionary<string, IFieldType>();
+				foreach (var method in type
+					.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance)
+					.Where(m => !m.IsSpecialName))
+				{
+					var funcAttr = method.GetCustomAttribute<SqlGraphQLFuncAttribute>();
 
-		            if (funcAttr != null)
-		            {
-		                var name = funcAttr.Name ?? Utils.FirstCharacterToLower(method.Name);
-		                var field = this.Fields.First(v => v.Name == name);
-		                if (funcAttr.ForwardTypeArguments)
-		                {
-			                var args = Utils.GetArgumentsForType(this.GetSqlFieldType(method.ReturnType),false);
-			                foreach (var queryArgument in args)
-			                {
-				                field.Arguments.Add(queryArgument);
-			                }
-		                }
+					if (funcAttr != null)
+					{
+						var name = funcAttr.Name ?? Utils.FirstCharacterToLower(method.Name);
+						var field = this.Fields.First(v => v.Name == name);
+						if (funcAttr.ForwardTypeArguments)
+						{
+							var args = Utils.GetArgumentsForType(
+								this.GetSqlFieldType(method.ReturnType),
+								false);
+							foreach (var queryArgument in args)
+							{
+								field.Arguments.Add(queryArgument);
+							}
+						}
 
-		                SqlFieldResolver<T>.fieldCache[type][name] = field;
-		            }
-		        }
+						SqlFieldResolver<T>.fieldCache[type][name] = field;
+					}
+				}
 
-		        foreach (var prop in type.GetProperties(
-		            BindingFlags.Public | BindingFlags.IgnoreCase | BindingFlags.Instance))
-		        {
-		            var fieldAttr = prop.GetCustomAttribute<SqlGraphQLRelatedAttribute>();
-		            if (fieldAttr == null)
-		            {
-		                continue;
-		            }
+				foreach (var prop in type.GetProperties(
+					BindingFlags.Public | BindingFlags.IgnoreCase | BindingFlags.Instance))
+				{
+					var fieldAttr = prop.GetCustomAttribute<SqlGraphQLRelatedAttribute>();
+					if (fieldAttr == null)
+					{
+						continue;
+					}
 
-		            var name = fieldAttr.Name ?? Utils.FirstCharacterToLower(prop.Name);
-		            var field = this.Fields.FirstOrDefault(v => v.Name == name);
-		            if (field == null)
-		            {
-		                throw new ArgumentException($"Could not find field for {name}");
-		            }
+					var name = fieldAttr.Name ?? Utils.FirstCharacterToLower(prop.Name);
+					var field = this.Fields.FirstOrDefault(v => v.Name == name);
+					if (field == null)
+					{
+						throw new ArgumentException($"Could not find field for {name}");
+					}
 
-		            field.Arguments = new QueryArguments(
-		                Utils.GetArgumentsForType(this.GetSqlFieldType(prop.PropertyType), false));
+					field.Arguments = new QueryArguments(
+						Utils.GetArgumentsForType(this.GetSqlFieldType(prop.PropertyType), false));
 
-		            SqlFieldResolver<T>.fieldCache[type][name] = field;
-		        }
-		    }
-		    else
-		    {
-		        foreach (var param in SqlFieldResolver<T>.fieldCache[type])
-		        {
-                    var name = param.Key;
-                    var value = param.Value;
-		            var field = this.Fields.FirstOrDefault(v => v.Name == name);
-		            if (field != null)
-		            {
-		                field.Arguments = value.Arguments;
-		            }
-		        }
-		    }
+					SqlFieldResolver<T>.fieldCache[type][name] = field;
+				}
+			}
+			else
+			{
+				foreach (var param in SqlFieldResolver<T>.fieldCache[type])
+				{
+					var name = param.Key;
+					var value = param.Value;
+					var field = this.Fields.FirstOrDefault(v => v.Name == name);
+					if (field != null)
+					{
+						field.Arguments = value.Arguments;
+					}
+				}
+			}
 		}
 
 		private Type GetSqlFieldType(Type returnType)
@@ -176,20 +188,20 @@ namespace GraphQL.Annotations.TSql
 			return returnType;
 		}
 
-        public DbField? GetDbFieldFromName(string propertyName, bool isIdentifierOnly = false)
-        {
-            return this.GetDbFieldFromProperty(
-                this.GetType().GetProperty(propertyName, SqlFieldResolver<T>.BindingFlags),
-                isIdentifierOnly
-            );
-        }
+		public DbField? GetDbFieldFromName(string propertyName, bool isIdentifierOnly = false)
+		{
+			return this.GetDbFieldFromProperty(
+				this.GetType().GetProperty(propertyName, SqlFieldResolver<T>.BindingFlags),
+				isIdentifierOnly
+			);
+		}
 
 		private DbField? GetDbFieldFromProperty(PropertyInfo prop, bool isIdentifierOnly = false)
 		{
-            if (prop == null)
-            {
-                return null;
-            }
+			if (prop == null)
+			{
+				return null;
+			}
 
 			var fieldAttr =
 				(ISqlFieldAttribute) prop.GetCustomAttribute<SqlGraphQLFieldAttribute>()
@@ -199,7 +211,9 @@ namespace GraphQL.Annotations.TSql
 				var sqlAttr = prop.GetCustomAttribute<SqlGraphQLRelatedAttribute>();
 				if (sqlAttr?.ForeignProperty != null)
 				{
-					var foreignProp = prop.ReflectedType?.GetProperty(sqlAttr.LocalProperty, SqlFieldResolver<T>.BindingFlags);
+					var foreignProp = prop.ReflectedType?.GetProperty(
+						sqlAttr.LocalProperty,
+						SqlFieldResolver<T>.BindingFlags);
 					if (foreignProp == null)
 					{
 						throw new ArgumentException(
@@ -214,7 +228,7 @@ namespace GraphQL.Annotations.TSql
 					{
 						Field = prop.Name,
 						Type = prop.PropertyType,
-					    IsIdentifierOnly = isIdentifierOnly
+						IsIdentifierOnly = isIdentifierOnly
 					};
 				}
 				else
@@ -234,9 +248,9 @@ namespace GraphQL.Annotations.TSql
 					Transform = fieldAttr.Transform,
 					SkipBuiltins = fieldAttr.SkipBuiltins,
 					IsTextField = fieldAttr.IsTextField,
-				    IsAggregation = fieldAttr.IsAggregation,
+					IsAggregation = fieldAttr.IsAggregation,
 					Alias = prop.Name,
-				    IsIdentifierOnly = isIdentifierOnly
+					IsIdentifierOnly = isIdentifierOnly
 				};
 			}
 
@@ -248,16 +262,16 @@ namespace GraphQL.Annotations.TSql
 				ReverseTransform = fieldAttr.ReverseTransform,
 				SkipBuiltins = fieldAttr.SkipBuiltins,
 				IsTextField = fieldAttr.IsTextField,
-			    IsAggregation = fieldAttr.IsAggregation,
+				IsAggregation = fieldAttr.IsAggregation,
 				Transform = fieldAttr.Transform,
-			    IsIdentifierOnly = isIdentifierOnly
+				IsIdentifierOnly = isIdentifierOnly
 			};
 		}
 
 		public BatchItem GetBatch(
 			IDictionary<string, Field> ipSubFields,
 			IDictionary<string, object> arguments,
-			ResolveFieldContext context,
+			IResolveFieldContext context,
 			PropertyInfo srcProperty = null
 		)
 		{
@@ -267,7 +281,9 @@ namespace GraphQL.Annotations.TSql
 				.Select(
 					v =>
 					{
-						var property = thisType.GetProperty(v.Value.Name, SqlFieldResolver<T>.BindingFlags);
+						var property = thisType.GetProperty(
+							v.Value.Name,
+							SqlFieldResolver<T>.BindingFlags);
 						var propertyAttr = (
 							property?.GetCustomAttribute<SqlGraphQLFieldAttribute>()
 							?? (object) property?.GetCustomAttribute<SqlFieldAttribute>()
@@ -276,11 +292,7 @@ namespace GraphQL.Annotations.TSql
 
 						if (propertyAttr != null)
 						{
-							return new
-							{
-								field = v,
-								property
-							};
+							return new {field = v, property};
 						}
 
 						return null;
@@ -291,15 +303,20 @@ namespace GraphQL.Annotations.TSql
 						.Select(
 							v =>
 							{
-								var method = thisType.GetMethod(v.Value.Name, SqlFieldResolver<T>.BindingFlags);
-								var methodAttr = method?.GetCustomAttribute<SqlGraphQLFuncAttribute>();
+								var method = thisType.GetMethod(
+									v.Value.Name,
+									SqlFieldResolver<T>.BindingFlags);
+								var methodAttr =
+									method?.GetCustomAttribute<SqlGraphQLFuncAttribute>();
 
 
 								return methodAttr?.RequiredProperties.Select(
 									w => new
 									{
 										field = v,
-										property = thisType.GetProperty(w, SqlFieldResolver<T>.BindingFlags)
+										property = thisType.GetProperty(
+											w,
+											SqlFieldResolver<T>.BindingFlags)
 									});
 							})
 						.Where(v => v != null)
@@ -307,7 +324,9 @@ namespace GraphQL.Annotations.TSql
 				)
 				.ToList();
 
-			var primaryProp = thisType.GetProperty(this.PrimaryProperty, SqlFieldResolver<T>.BindingFlags);
+			var primaryProp = thisType.GetProperty(
+				this.PrimaryProperty,
+				SqlFieldResolver<T>.BindingFlags);
 			if (primaryProp == null)
 			{
 				throw new ArgumentException("Invalid primary property set!");
@@ -378,11 +397,14 @@ namespace GraphQL.Annotations.TSql
 							);
 
 							result.LocalProperty = thisType.GetProperty(v.attr.LocalProperty);
-							result.LocalField = this.GetDbFieldFromProperty(result.LocalProperty, true)?.Field;
+							result.LocalField =
+								this.GetDbFieldFromProperty(result.LocalProperty, true)?.Field;
 							result.LocalJoinField = v.attr.LocalJoinField;
 							result.ForeignProperty = dstType.GetProperty(v.attr.ForeignProperty);
 							result.ForeignJoinField = v.attr.ForeignJoinField;
-							result.ForeignField = this.GetDbFieldFromProperty(result.ForeignProperty, true)?.Field;
+							result.ForeignField = this.GetDbFieldFromProperty(
+								result.ForeignProperty,
+								true)?.Field;
 							result.JoinTable = v.attr.JoinTable;
 							return result;
 						})
@@ -390,7 +412,8 @@ namespace GraphQL.Annotations.TSql
 
 			var count = this.GetArgument<int?>("_fetchCount", arguments, context);
 			var offset = this.GetArgument<int?>("_offset", arguments, context);
-			var orderBy = this.GetArgument<IEnumerable<object>>("_orderBy", arguments, context)?.ToList();
+			var orderBy = this.GetArgument<IEnumerable<object>>("_orderBy", arguments, context)
+				?.ToList();
 
 			if (orderBy != null && orderBy.Count > 0)
 			{
@@ -398,15 +421,18 @@ namespace GraphQL.Annotations.TSql
 					.Select(
 						v => new OrderByParameter
 						{
-							Field = (string) v["field"],
-							Descending = (bool) v["descending"]
+							Field = (string) v["field"], Descending = (bool) v["descending"]
 						})
 					.Select(
 						// ReSharper disable once ImplicitlyCapturedClosure
 						v =>
 						{
-							var prop = thisType.GetProperty(v.Field, SqlFieldResolver<T>.BindingFlags);
-							var newValue = prop == null ? null : this.GetDbFieldFromProperty(prop)?.Field;
+							var prop = thisType.GetProperty(
+								v.Field,
+								SqlFieldResolver<T>.BindingFlags);
+							var newValue = prop == null
+								? null
+								: this.GetDbFieldFromProperty(prop)?.Field;
 							v.Field = newValue ?? v.Field;
 							return v;
 						});
@@ -415,11 +441,7 @@ namespace GraphQL.Annotations.TSql
 			{
 				batchItem.OrderBy = new List<OrderByParameter>
 				{
-					new OrderByParameter
-					{
-						Field = this.DefaultOrder,
-						Descending = false
-					}
+					new OrderByParameter {Field = this.DefaultOrder, Descending = false}
 				};
 			}
 
@@ -436,12 +458,17 @@ namespace GraphQL.Annotations.TSql
 			return batchItem;
 		}
 
-		private TArgumentType GetArgument<TArgumentType>(string argumentName, IDictionary<string,object> arguments, ResolveFieldContext context)
+		private TArgumentType GetArgument<TArgumentType>(
+			string argumentName,
+			IDictionary<string, object> arguments,
+			IResolveFieldContext context)
 		{
-			return this.GetArgument<TArgumentType>(arguments.FirstOrDefault(v => v.Key == argumentName).Value, context);
+			return this.GetArgument<TArgumentType>(
+				arguments.FirstOrDefault(v => v.Key == argumentName).Value,
+				context);
 		}
 
-		private TArgumentType GetArgument<TArgumentType>(object value, ResolveFieldContext context)
+		private TArgumentType GetArgument<TArgumentType>(object value, IResolveFieldContext context)
 		{
 			if (value is string s)
 			{
@@ -482,7 +509,7 @@ namespace GraphQL.Annotations.TSql
 			}
 		}
 
-	    public string GetNextAlias()
+		public string GetNextAlias()
 		{
 			this.IncrementChar(0, this._firstOpts.Length);
 
@@ -512,7 +539,8 @@ namespace GraphQL.Annotations.TSql
 					return v;
 				}).ToList();
 			batch.ChildQueries = batch.ChildQueries.Select(this.SetAliases).ToList();
-			if (batch.ChildQueries.GroupBy(v => v.SrcProperty ?? v.LocalProperty).Any(v => v.Count() > 1))
+			if (batch.ChildQueries.GroupBy(v => v.SrcProperty ?? v.LocalProperty)
+				.Any(v => v.Count() > 1))
 			{
 				throw new ArgumentException("You cannot query the same property more than once");
 			}
@@ -523,7 +551,7 @@ namespace GraphQL.Annotations.TSql
 		public virtual IEnumerable<WhereItem> GetWhere(
 			BatchItem batch,
 			bool isSubquery,
-			ResolveFieldContext context,
+			IResolveFieldContext context,
 			bool isFirst)
 		{
 			var alias = isSubquery ? "" : $"[{batch.Alias}].";
@@ -544,14 +572,14 @@ namespace GraphQL.Annotations.TSql
 					{
 						return String.Format(
 							SqlFieldResolverData.Parameters[SqlFieldResolverData.TypeMap[type]]
-							.GetTemplate((IDictionary<string, object>) v.Value),
+								.GetTemplate((IDictionary<string, object>) v.Value),
 							$"{alias}[{v.Field.Field.Replace("]", "")}]",
 							value
 						);
 					}
 					else
 					{
-						return (WhereItem)$"{alias}[{v.Field.Field.Replace("]", "")}] = {value}";
+						return (WhereItem) $"{alias}[{v.Field.Field.Replace("]", "")}] = {value}";
 					}
 				});
 
@@ -566,7 +594,7 @@ namespace GraphQL.Annotations.TSql
 
 		protected virtual Dictionary<string, DbValue> GetParameters(
 			BatchItem batch,
-			ResolveFieldContext context,
+			IResolveFieldContext context,
 			Dictionary<string, DbValue> parameters = null)
 		{
 			if (parameters == null)
@@ -579,7 +607,8 @@ namespace GraphQL.Annotations.TSql
 				if (SqlFieldResolverData.TypeMap.ContainsKey(v.Field.Type))
 				{
 					object value;
-					var field = SqlFieldResolverData.Parameters[SqlFieldResolverData.TypeMap[v.Field.Type]];
+					var field =
+						SqlFieldResolverData.Parameters[SqlFieldResolverData.TypeMap[v.Field.Type]];
 					if (v.Value is IDictionary<string, object> objects)
 					{
 						value = field.GetValue(objects);
@@ -626,57 +655,77 @@ namespace GraphQL.Annotations.TSql
 			}
 
 
-		    var agg = context.GetRequiredService<AggregationSqlFieldGenerator>();
-		    if (agg.IsAggregation(batch))
-		    {
-		        agg.GetExtraParams(batch, context, this, parameters);
-		    }
+			var agg = context.GetRequiredService<AggregationSqlFieldGenerator>();
+			if (agg.IsAggregation(batch))
+			{
+				agg.GetExtraParams(batch, context, this, parameters);
+			}
 
 			return parameters;
 		}
 
 		public IEnumerable<object> BuildObjects(
-		    List<IEnumerable<IDictionary<string, object>>> resultSet,
-		    BatchItem batch,
-		    string joinTo = null,
-		    object parent = null,
-		    Func<IDictionary<string, object>, object> parentValueGetter = null,
-		    object parentValue = null,
-		    bool isAggMode = false,
-		    Dictionary<string, Dictionary<NullObject<object>, IEnumerable<IDictionary<string, object>>>> cache = null
-        )
+			List<IEnumerable<IDictionary<string, object>>> resultSet,
+			BatchItem batch,
+			string joinTo = null,
+			object parent = null,
+			Func<IDictionary<string, object>, object> parentValueGetter = null,
+			object parentValue = null,
+			bool isAggMode = false,
+			Dictionary<string,
+					Dictionary<NullObject<object>, IEnumerable<IDictionary<string, object>>>> cache
+				=
+				null
+		)
 		{
 			if (!resultSet.Any())
 			{
 				return new List<object>();
 			}
 
-		    isAggMode = isAggMode || batch.Fields.Any(v => v.IsAggregation);
+			isAggMode = isAggMode || batch.Fields.Any(v => v.IsAggregation);
 
 			var rows = this.GetRows(resultSet, $"{batch.Alias}_");
 
-		    if (rows == null)
-		    {
-		        // This is caused by the aggregation, just pass through to the next level(s) with an empty object
-		        var result = Activator.CreateInstance(batch.DestType);
-		        result = this.HandleChildren(result, batch, resultSet, parentValueGetter, parentValue, isAggMode, cache);
-		        return new [] { result };
-		    }
+			if (rows == null)
+			{
+				// This is caused by the aggregation, just pass through to the next level(s) with an empty object
+				var result = Activator.CreateInstance(batch.DestType);
+				result = this.HandleChildren(
+					result,
+					batch,
+					resultSet,
+					parentValueGetter,
+					parentValue,
+					isAggMode,
+					cache);
+				return new[] {result};
+			}
 
-			rows = this.FilterRows(rows.ToList(), isAggMode, parentValueGetter, parentValue, batch, joinTo, parent, cache);
+			rows = this.FilterRows(
+				rows.ToList(),
+				isAggMode,
+				parentValueGetter,
+				parentValue,
+				batch,
+				joinTo,
+				parent,
+				cache);
 
 			var key = $"{batch.Alias}_{batch.PrimaryProperty}";
-		    Func<IDictionary<string, object>, object> valueGetter = v =>
-		    {
-			    return new NullObject<object>(v.ContainsKey(key) ? v[key] : null);
-		    };
-		    if (isAggMode)
-		    {
-		        // When aggregating we will be getting a single flat structure, just use the ROW_NUM
-		        valueGetter = v => new NullObject<object>(v["ROW_NUM"]);
-		    }
+			Func<IDictionary<string, object>, object> valueGetter = v =>
+			{
+				return new NullObject<object>(v.ContainsKey(key) ? v[key] : null);
+			};
+			if (isAggMode)
+			{
+				// When aggregating we will be getting a single flat structure, just use the ROW_NUM
+				valueGetter = v => new NullObject<object>(v["ROW_NUM"]);
+			}
 
-		    var childCache = new Dictionary<string, Dictionary<NullObject<object>, IEnumerable<IDictionary<string, object>>>>();
+			var childCache =
+				new Dictionary<string, Dictionary<NullObject<object>,
+					IEnumerable<IDictionary<string, object>>>>();
 
 			return rows
 				.GroupBy(valueGetter)
@@ -686,11 +735,20 @@ namespace GraphQL.Annotations.TSql
 					{
 						var result = this.CreateObject(batch, v);
 
-					    return this.HandleChildren(result, batch, resultSet, valueGetter, v.Key, isAggMode, childCache);
+						return this.HandleChildren(
+							result,
+							batch,
+							resultSet,
+							valueGetter,
+							v.Key,
+							isAggMode,
+							childCache);
 					});
 		}
 
-		private object CreateObject(BatchItem batch, IGrouping<object, IDictionary<string, object>> rows)
+		private object CreateObject(
+			BatchItem batch,
+			IGrouping<object, IDictionary<string, object>> rows)
 		{
 			var result = Activator.CreateInstance(batch.DestType);
 			var selfProps = rows.First().Where(w => w.Key.StartsWith($"{batch.Alias}_"));
@@ -702,7 +760,8 @@ namespace GraphQL.Annotations.TSql
 				var prop = batch.DestType.GetProperty(row.Key.Substring(prefixLength));
 				try
 				{
-					if (prop?.PropertyType?.IsNullable() == true && prop.PropertyType.GenericTypeArguments[0].IsEnum)
+					if (prop?.PropertyType?.IsNullable() == true
+						&& prop.PropertyType.GenericTypeArguments[0].IsEnum)
 					{
 						if (value == null)
 						{
@@ -710,7 +769,9 @@ namespace GraphQL.Annotations.TSql
 						}
 						else
 						{
-							prop.SetValue(result, Enum.ToObject(prop.PropertyType.GenericTypeArguments[0], value));
+							prop.SetValue(
+								result,
+								Enum.ToObject(prop.PropertyType.GenericTypeArguments[0], value));
 						}
 					}
 					else
@@ -723,17 +784,17 @@ namespace GraphQL.Annotations.TSql
 					try
 					{
 						throw (Exception) e.GetType().GetConstructor(
-							new[]
-							{
-								typeof(string),
-								typeof(Exception)
-							}
-						)?.Invoke(
-							new object[]
-							{
-								e.Message + $" while assigning {prop?.DeclaringType?.FullName}::{prop?.Name}",
-								e
-							}) ?? new Exception(e.Message + $" while assigning {prop?.DeclaringType?.FullName}::{prop?.Name}");
+								new[] {typeof(string), typeof(Exception)}
+							)?.Invoke(
+								new object[]
+								{
+									e.Message
+									+ $" while assigning {prop?.DeclaringType?.FullName}::{prop?.Name}",
+									e
+								})
+							?? new Exception(
+								e.Message
+								+ $" while assigning {prop?.DeclaringType?.FullName}::{prop?.Name}");
 					}
 					catch (Exception)
 					{
@@ -753,47 +814,48 @@ namespace GraphQL.Annotations.TSql
 			BatchItem batch,
 			string joinTo,
 			object parent,
-			IDictionary<string, Dictionary<NullObject<object>, IEnumerable<IDictionary<string, object>>>> cache
+			IDictionary<string,
+				Dictionary<NullObject<object>, IEnumerable<IDictionary<string, object>>>> cache
 		)
 		{
 			if (isAggMode)
-            {
-                // No FKs in agg mode
-                if (parentValueGetter != null && rows.Any(v => parentValueGetter(v) != null))
-                {
-                    return rows.Where(v => parentValueGetter(v).Equals(parentValue)).ToList();
-                }
-            }
-            else
-            {
-                if (batch.ForeignField != null && joinTo != null && parent != null && cache != null)
-                {
-                    var fkId = $"{joinTo}_{batch.LocalProperty.Name.Replace("]", "")}";
-                    var fkValue = batch.LocalProperty.GetValue(parent);
-                    if (rows.First().Keys.Contains($"FK_{fkId}"))
-                    {
-                        fkId = $"FK_{fkId}";
-                    }
+			{
+				// No FKs in agg mode
+				if (parentValueGetter != null && rows.Any(v => parentValueGetter(v) != null))
+				{
+					return rows.Where(v => parentValueGetter(v).Equals(parentValue)).ToList();
+				}
+			}
+			else
+			{
+				if (batch.ForeignField != null && joinTo != null && parent != null && cache != null)
+				{
+					var fkId = $"{joinTo}_{batch.LocalProperty.Name.Replace("]", "")}";
+					var fkValue = batch.LocalProperty.GetValue(parent);
+					if (rows.First().Keys.Contains($"FK_{fkId}"))
+					{
+						fkId = $"FK_{fkId}";
+					}
 
-	                var key = fkId + rows.GetHashCode();
-                    if (!cache.ContainsKey(key))
-                    {
-                        cache[key] = rows.GroupBy(v => v[fkId]).ToDictionary(
-                            v => new NullObject<object>(v.Key),
-                            v => v.ToList().AsEnumerable()
-                        );
-                    }
+					var key = fkId + rows.GetHashCode();
+					if (!cache.ContainsKey(key))
+					{
+						cache[key] = rows.GroupBy(v => v[fkId]).ToDictionary(
+							v => new NullObject<object>(v.Key),
+							v => v.ToList().AsEnumerable()
+						);
+					}
 
-	                if (cache[key].ContainsKey(fkValue))
-	                {
-		                return cache[key][fkValue];
-	                }
-	                else
-	                {
-		                return new List<IDictionary<string, object>>();
-	                }
-                }
-            }
+					if (cache[key].ContainsKey(fkValue))
+					{
+						return cache[key][fkValue];
+					}
+					else
+					{
+						return new List<IDictionary<string, object>>();
+					}
+				}
+			}
 
 			return rows;
 		}
@@ -808,162 +870,188 @@ namespace GraphQL.Annotations.TSql
 			)?.ToList();
 		}
 
-		private object HandleChildren(object result,
-	        BatchItem batch,
-	        List<IEnumerable<IDictionary<string, object>>> resultSet,
-	        Func<IDictionary<string, object>, object> valueGetter,
-	        object parentValue,
-	        bool isAggMode,
-	        Dictionary<string, Dictionary<NullObject<object>, IEnumerable<IDictionary<string, object>>>> cache)
-	    {
-	        foreach (var child in batch.ChildQueries)
-	        {
-	            var childResult = this.BuildObjects(resultSet, child, batch.Alias, result, valueGetter, parentValue, isAggMode, cache);
-	            try
-	            {
-	                var srcType = child.SrcProperty.PropertyType;
-	                if (
-	                    srcType.IsGenericType
-	                    && srcType == typeof(IEnumerable<>).MakeGenericType(srcType.GenericTypeArguments[0])
-	                )
-	                {
-	                    child.SrcProperty.SetValue(
-	                        result,
-	                        typeof(Enumerable).GetMethod("Cast")?
-	                            .MakeGenericMethod(srcType.GenericTypeArguments[0])
-	                            .Invoke(null, new object[] {childResult.ToList()})
-	                    );
-	                }
-	                else
-	                {
-	                    child.SrcProperty.SetValue(
-	                        result,
-	                        childResult.FirstOrDefault()
-	                    );
-	                }
-	            }
-	            catch (Exception e)
-	            {
-	                try
-	                {
-	                    throw (Exception) e.GetType().GetConstructor(
-	                        new[]
-	                        {
-	                            typeof(string),
-	                            typeof(Exception)
-	                        }
-	                    )?.Invoke(
-	                        new object[]
-	                        {
-	                            e.Message + $" while assigning {child.SrcProperty?.DeclaringType?.FullName}::{child.SrcProperty?.Name}",
-	                            e
-	                        }) ?? new Exception(
-								e.Message + $" while assigning {child.SrcProperty?.DeclaringType?.FullName}::{child.SrcProperty?.Name}",
+		private object HandleChildren(
+			object result,
+			BatchItem batch,
+			List<IEnumerable<IDictionary<string, object>>> resultSet,
+			Func<IDictionary<string, object>, object> valueGetter,
+			object parentValue,
+			bool isAggMode,
+			Dictionary<string,
+				Dictionary<NullObject<object>, IEnumerable<IDictionary<string, object>>>> cache)
+		{
+			foreach (var child in batch.ChildQueries)
+			{
+				var childResult = this.BuildObjects(
+					resultSet,
+					child,
+					batch.Alias,
+					result,
+					valueGetter,
+					parentValue,
+					isAggMode,
+					cache);
+				try
+				{
+					var srcType = child.SrcProperty.PropertyType;
+					if (
+						srcType.IsGenericType
+						&& srcType
+						== typeof(IEnumerable<>).MakeGenericType(srcType.GenericTypeArguments[0])
+					)
+					{
+						child.SrcProperty.SetValue(
+							result,
+							typeof(Enumerable).GetMethod("Cast")?
+								.MakeGenericMethod(srcType.GenericTypeArguments[0])
+								.Invoke(null, new object[] {childResult.ToList()})
+						);
+					}
+					else
+					{
+						child.SrcProperty.SetValue(
+							result,
+							childResult.FirstOrDefault()
+						);
+					}
+				}
+				catch (Exception e)
+				{
+					try
+					{
+						throw (Exception) e.GetType().GetConstructor(
+								new[] {typeof(string), typeof(Exception)}
+							)?.Invoke(
+								new object[]
+								{
+									e.Message
+									+ $" while assigning {child.SrcProperty?.DeclaringType?.FullName}::{child.SrcProperty?.Name}",
+									e
+								})
+							?? new Exception(
+								e.Message
+								+ $" while assigning {child.SrcProperty?.DeclaringType?.FullName}::{child.SrcProperty?.Name}",
 								e
-		                    );
-	                }
-	                catch (Exception)
-	                {
-	                    // ignored
-	                }
+							);
+					}
+					catch (Exception)
+					{
+						// ignored
+					}
 
-	                throw;
-	            }
-	        }
+					throw;
+				}
+			}
 
-	        return result;
-	    }
+			return result;
+		}
 
-	    public string GetFieldSql(string batchAlias, DbField field)
-	    {
-	        var transform = field.Transform;
+		public string GetFieldSql(string batchAlias, DbField field)
+		{
+			var transform = field.Transform;
 
-	        if (String.IsNullOrEmpty(transform) && field.Type == typeof(string) && !field.SkipBuiltins)
-	        {
-	            transform = "IsNull([{0}].[{1}], " + (field.IsTextField ? "CAST('' AS TEXT)" : "''") + ")";
-	        }
+			if (String.IsNullOrEmpty(transform)
+				&& field.Type == typeof(string)
+				&& !field.SkipBuiltins)
+			{
+				transform = "IsNull([{0}].[{1}], "
+					+ (field.IsTextField ? "CAST('' AS TEXT)" : "''")
+					+ ")";
+			}
 
-	        if (transform != null)
-	        {
-	            return String.Format(transform, batchAlias, field.Field.Replace("]", ""));
-	        }
+			if (transform != null)
+			{
+				return String.Format(transform, batchAlias, field.Field.Replace("]", ""));
+			}
 
-	        return (
-	            $"[{batchAlias}].[{field.Field.Replace("]", "")}]"
-	        );
-	    }
+			return (
+				$"[{batchAlias}].[{field.Field.Replace("]", "")}]"
+			);
+		}
 
-	    public virtual IEnumerable<string> GetSelect(
-		    BatchItem batch,
-		    string joinTo,
-		    bool includeIds = true,
-		    bool isFirst = true,
-		    IEnumerable<DbField> fields = null,
-		    bool includeAll = false
+		public virtual IEnumerable<string> GetSelect(
+			BatchItem batch,
+			string joinTo,
+			bool includeIds = true,
+			bool isFirst = true,
+			IEnumerable<DbField> fields = null,
+			bool includeAll = false
 		)
-	    {
-		    if(batch.DestType != this.GetType())
-		    {
-			    return SqlFieldResolverData.Resolvers[batch.DestType].GetSelect(
-				    batch,
-				    joinTo,
-				    includeIds,
-				    isFirst,
-				    fields,
-				    includeAll
-			    );
-		    }
+		{
+			if (batch.DestType != this.GetType())
+			{
+				return SqlFieldResolverData.Resolvers[batch.DestType].GetSelect(
+					batch,
+					joinTo,
+					includeIds,
+					isFirst,
+					fields,
+					includeAll
+				);
+			}
 
-	        var result = (fields ?? batch.Fields)
-	            .Select(v => $"{this.GetFieldSql(batch.Alias, v)} AS [{v.Alias.Replace("]", "")}]");
-	        if (batch.ChildQueries.Count() == 1 || includeAll)
-	        {
-	            result = result.Concat(
-		            batch.ChildQueries.SelectMany((child) => this.GetSelect(child, null, includeIds, false))
-		        );
-	            if (includeIds)
-	            {
-	                result = result.Concat(
-		                batch.ChildQueries.Select((child) => $"[{batch.Alias}].[{child.LocalField.Replace("]", "")}] AS [{batch.Alias}_{child.LocalProperty.Name.Replace("]", "")}]")
-			        );
-	            }
-	        }
+			var result = (fields ?? batch.Fields)
+				.Select(v => $"{this.GetFieldSql(batch.Alias, v)} AS [{v.Alias.Replace("]", "")}]");
+			if (batch.ChildQueries.Count() == 1 || includeAll)
+			{
+				result = result.Concat(
+					batch.ChildQueries.SelectMany(
+						(child) => this.GetSelect(child, null, includeIds, false))
+				);
+				if (includeIds)
+				{
+					result = result.Concat(
+						batch.ChildQueries.Select(
+							(child) =>
+								$"[{batch.Alias}].[{child.LocalField.Replace("]", "")}] AS [{batch.Alias}_{child.LocalProperty.Name.Replace("]", "")}]")
+					);
+				}
+			}
 
-	        if (joinTo != null)
-	        {
-	            result = result.Append(
-	                $"[{joinTo}].[{batch.LocalField.Replace("]", "")}] AS [FK_{joinTo}_{batch.LocalProperty.Name.Replace("]", "")}]");
-	        }
+			if (joinTo != null)
+			{
+				result = result.Append(
+					$"[{joinTo}].[{batch.LocalField.Replace("]", "")}] AS [FK_{joinTo}_{batch.LocalProperty.Name.Replace("]", "")}]");
+			}
 
-	        return result;
-	    }
+			return result;
+		}
 
 		public string BuildQuery(
 			BatchItem batch,
-			ResolveFieldContext context,
+			IResolveFieldContext context,
 			string previousFrom = null,
 			string joinTo = null)
 		{
-		    var agg = context.GetRequiredService<AggregationSqlFieldGenerator>();
-		    if (agg.IsAggregation(batch))
-		    {
-		        return agg.BuildQuery(batch, context, this, previousFrom, joinTo);
-		    }
+			var agg = context.GetRequiredService<AggregationSqlFieldGenerator>();
+			if (agg.IsAggregation(batch))
+			{
+				return agg.BuildQuery(batch, context, this, previousFrom, joinTo);
+			}
 
-			return context.GetRequiredService<StandardSqlFieldGenerator>().BuildQuery(batch, context, this, previousFrom, joinTo);
+			return context.GetRequiredService<StandardSqlFieldGenerator>().BuildQuery(
+				batch,
+				context,
+				this,
+				previousFrom,
+				joinTo);
 		}
 
-		public virtual int GetCount(IDictionary<string, object> arguments, ResolveFieldContext context)
+		public virtual int GetCount(
+			IDictionary<string, object> arguments,
+			IResolveFieldContext context)
 		{
 			var parent = CountResolver.GetParentNode(context.Document, context.FieldAst);
-			var siblings = parent.Children.Cast<Field>().Where(v => v.Name != context.FieldAst.Name).ToList();
+			var siblings = parent.Children.Cast<Field>().Where(v => v.Name != context.FieldAst.Name)
+				.ToList();
 			if (siblings.Count == 0)
 			{
 				throw new CountResolverException("No sibling found");
 			}
 			else if (siblings.Count > 1)
 			{
-				throw new CountResolverException("Multiple siblings found, _count only works with one sibling");
+				throw new CountResolverException(
+					"Multiple siblings found, _count only works with one sibling");
 			}
 
 			var sibling = siblings.First();
@@ -994,12 +1082,21 @@ namespace GraphQL.Annotations.TSql
 			var agg = context.GetRequiredService<AggregationSqlFieldGenerator>();
 			if (agg.IsAggregation(baseBatch))
 			{
-				var oldArguments = context.Arguments;
-				context.Arguments = siblingArguments;
+				var oldArguments = context.Arguments.ToList();
+				context.Arguments.Clear();
+				foreach (var (key, value) in siblingArguments)
+				{
+					context.Arguments.Add(key, value);
+				}
+
 				baseBatch = this.SetAliases(baseBatch);
 				query = this.BuildQuery(baseBatch, context);
 				parameters = this.GetParameters(baseBatch, context);
-				context.Arguments = oldArguments;
+				context.Arguments.Clear();
+				foreach (var (key, value) in oldArguments)
+				{
+					context.Arguments.Add(key, value);
+				}
 
 				query = new Regex("SELECT \\* FROM").Replace(query, "SELECT COUNT(*) FROM");
 				query = new Regex("ORDER BY [^ ]*$").Replace(query, "");
@@ -1012,11 +1109,7 @@ namespace GraphQL.Annotations.TSql
 				batch.ChildQueries = new List<BatchItem>();
 				batch.Fields = new List<DbField>
 				{
-					new DbField
-					{
-						RawField = "count(*) AS [count]",
-						Field = "count"
-					}
+					new DbField {RawField = "count(*) AS [count]", Field = "count"}
 				};
 
 				batch.OrderBy = null;
@@ -1026,190 +1119,201 @@ namespace GraphQL.Annotations.TSql
 				parameters = this.GetParameters(batch, context);
 			}
 
-		    var results = new List<IEnumerable<IDictionary<string, object>>>();
+			var results = new List<IEnumerable<IDictionary<string, object>>>();
 
-		    using (var connection = this.GetConnection(context))
-		    {
-		        using (var command = new SqlCommand(query, connection))
-		        {
-		            foreach (var param in parameters)
-                    {
-                        var name = param.Key;
-                        var value = param.Value;
-		                command.Parameters.Add(name, value.Type);
-		                command.Parameters[name].Value = value.Value ?? DBNull.Value;
-		            }
+			using (var connection = this.GetConnection(context))
+			{
+				using (var command = new SqlCommand(query, connection))
+				{
+					foreach (var param in parameters)
+					{
+						var name = param.Key;
+						var value = param.Value;
+						command.Parameters.Add(name, value.Type);
+						command.Parameters[name].Value = value.Value ?? DBNull.Value;
+					}
 
-		            connection.Open();
+					connection.Open();
 
-		            using (var reader = command.ExecuteReader())
-		            {
-		                do
-		                {
-		                    var list = new List<IDictionary<string, object>>();
-		                    while (reader.Read())
-		                    {
-		                        var res = new Dictionary<string, object>();
-		                        for (var i = 0; i < reader.FieldCount; i++)
-		                        {
-		                            if (reader.IsDBNull(i))
-		                            {
-		                                res[reader.GetName(i)] = null;
-		                            }
-		                            else
-		                            {
-		                                res[reader.GetName(i)] = reader.GetValue(i);
-		                            }
-		                        }
+					using (var reader = command.ExecuteReader())
+					{
+						do
+						{
+							var list = new List<IDictionary<string, object>>();
+							while (reader.Read())
+							{
+								var res = new Dictionary<string, object>();
+								for (var i = 0; i < reader.FieldCount; i++)
+								{
+									if (reader.IsDBNull(i))
+									{
+										res[reader.GetName(i)] = null;
+									}
+									else
+									{
+										res[reader.GetName(i)] = reader.GetValue(i);
+									}
+								}
 
-		                        list.Add(res);
-		                    }
+								list.Add(res);
+							}
 
-		                    results.Add(list);
-		                } while (reader.NextResult());
-		            }
-		        }
-		    }
+							results.Add(list);
+						} while (reader.NextResult());
+					}
+				}
+			}
 
 			return (int) results.First().First().First().Value;
 		}
 
-		private SqlConnection GetConnection(ResolveFieldContext context)
+		private SqlConnection GetConnection(IResolveFieldContext context)
 		{
 			return context.GetRequiredService<ISqlConnectionGetter>().GetConnection(context);
 		}
 
-		public virtual object Resolve(ResolveFieldContext context)
+		public virtual object Resolve(IResolveFieldContext context)
 		{
 			Dictionary<string, object> baseMetricMetadata = null;
-			try
-			{
-				baseMetricMetadata =
-					context.Metrics.AllRecords.LastOrDefault((v) => v.Category == "field")
-						?.Metadata;
-			} catch(ArgumentNullException) {}
+			//TODO: Put debugging logging back in
+			// try
+			// {
+			// 	baseMetricMetadata =
+			// 		context.Metrics.AllRecords.LastOrDefault((v) => v.Category == "field")
+			// 			?.Metadata;
+			// }
+			// catch (ArgumentNullException)
+			// {
+			// }
 
 			using (this.Subject(context, baseMetricMetadata))
-		    {
-			    var batch = this.GetBatch(context.SubFields, context.Arguments, context);
-			    this.ResetAlias();
-			    batch = this.SetAliases(batch);
+			{
+				var batch = this.GetBatch(context.SubFields, context.Arguments, context);
+				this.ResetAlias();
+				batch = this.SetAliases(batch);
 
-			    string query;
-			    Dictionary<string, DbValue> parameters;
+				string query;
+				Dictionary<string, DbValue> parameters;
 
-			    using (this.Subject("queryBuild", context, baseMetricMetadata))
-			    {
-				    query =
-					    new Regex("[ \\t\\r\\n]+", RegexOptions.Multiline).Replace(
-						    this.BuildQuery(batch, context),
-						    " ");
-				    parameters = this.GetParameters(batch, context);
-			    }
+				using (this.Subject("queryBuild", context, baseMetricMetadata))
+				{
+					query =
+						new Regex("[ \\t\\r\\n]+", RegexOptions.Multiline).Replace(
+							this.BuildQuery(batch, context),
+							" ");
+					parameters = this.GetParameters(batch, context);
+				}
 
-			    try
-			    {
-				    var results = new List<IEnumerable<IDictionary<string, object>>>();
+				try
+				{
+					var results = new List<IEnumerable<IDictionary<string, object>>>();
 
-				    using (this.Subject(
-					    "queryExecute",
-					    context,
-					    baseMetricMetadata != null ? new Dictionary<string, object> (baseMetricMetadata)
-					    {
-						    {
-							    "parameters",
-							    String.Join("\n", parameters
-										.Select(
-											pair =>
+					using (this.Subject(
+						"queryExecute",
+						context,
+						baseMetricMetadata != null
+							? new Dictionary<string, object>(baseMetricMetadata)
+							{
+								{
+									"parameters", string.Join(
+										"\n",
+										parameters
+											.Select(
+												pair =>
+												{
+													var value = pair.Value.Value;
+													if (value is string)
+													{
+														value = $"'{value}'";
+													}
+
+													var type = pair.Value.Type.ToString();
+													if (pair.Value.Type == SqlDbType.NVarChar)
+													{
+														type += "(MAX)";
+													}
+
+													return $"DECLARE {pair.Key} {type} = {value};";
+												})
+									)
+								},
+								{"query", query}
+							}
+							: null))
+					{
+						using (var connection = this.GetConnection(context))
+						{
+							using (var command = new SqlCommand(query, connection))
+							{
+								foreach (var param in parameters)
+								{
+									var name = param.Key;
+									var value = param.Value;
+									command.Parameters.Add(name, value.Type);
+									command.Parameters[name].Value = value.Value ?? DBNull.Value;
+								}
+
+								connection.Open();
+
+								using (var reader = command.ExecuteReader())
+								{
+									do
+									{
+										var list = new List<IDictionary<string, object>>();
+										while (reader.Read())
+										{
+											var res = new Dictionary<string, object>();
+											for (var i = 0; i < reader.FieldCount; i++)
 											{
-												var value = pair.Value.Value;
-												if (value is string)
+												if (reader.IsDBNull(i))
 												{
-													value = $"'{value}'";
+													res[reader.GetName(i)] = null;
 												}
-
-												var type = pair.Value.Type.ToString();
-												if (pair.Value.Type == SqlDbType.NVarChar)
+												else
 												{
-													type += "(MAX)";
+													res[reader.GetName(i)] = reader.GetValue(i);
 												}
+											}
 
-												return $"DECLARE {pair.Key} {type} = {value};";
-											})
-								)
-						    },
-						    {"query", query}
-					    } : null))
-				    {
-					    using (var connection = this.GetConnection(context))
-					    {
-						    using (var command = new SqlCommand(query, connection))
-						    {
-							    foreach (var param in parameters)
-							    {
-								    var name = param.Key;
-								    var value = param.Value;
-								    command.Parameters.Add(name, value.Type);
-								    command.Parameters[name].Value = value.Value ?? DBNull.Value;
-							    }
+											list.Add(res);
+										}
 
-							    connection.Open();
+										results.Add(list);
+									} while (reader.NextResult());
+								}
+							}
+						}
+					}
 
-							    using (var reader = command.ExecuteReader())
-							    {
-								    do
-								    {
-									    var list = new List<IDictionary<string, object>>();
-									    while (reader.Read())
-									    {
-										    var res = new Dictionary<string, object>();
-										    for (var i = 0; i < reader.FieldCount; i++)
-										    {
-											    if (reader.IsDBNull(i))
-											    {
-												    res[reader.GetName(i)] = null;
-											    }
-											    else
-											    {
-												    res[reader.GetName(i)] = reader.GetValue(i);
-											    }
-										    }
-
-										    list.Add(res);
-									    }
-
-									    results.Add(list);
-								    } while (reader.NextResult());
-							    }
-						    }
-					    }
-				    }
-
-				    using (this.Subject(
-					    "buildObjects",
-					    context,
-					    baseMetricMetadata != null ? new Dictionary<string, object> (baseMetricMetadata)
-					    {
-						    { "ResultSets", (int?)results.Count },
-						    { "ResultSetCounts", results.Select(v => v.Count()) }
-					    } : null)
-				    )
-				    {
-					    return this.BuildObjects(
-						    results.Where(v => v.Any()).ToList(),
-						    batch
-					    ).ToList();
-				    }
-			    }
-			    catch (SqlException e)
-			    {
-				    throw new Exception(
-					    $"Failed to execute sql {query} using arguments {JsonConvert.SerializeObject(parameters)} => {e}");
-			    }
-		    }
+					using (this.Subject(
+						"buildObjects",
+						context,
+						baseMetricMetadata != null
+							? new Dictionary<string, object>(baseMetricMetadata)
+							{
+								{"ResultSets", (int?) results.Count},
+								{"ResultSetCounts", results.Select(v => v.Count())}
+							}
+							: null)
+					)
+					{
+						return this.BuildObjects(
+							results.Where(v => v.Any()).ToList(),
+							batch
+						).ToList();
+					}
+				}
+				catch (SqlException e)
+				{
+					throw new Exception(
+						$"Failed to execute sql {query} using arguments {JsonSerializer.Serialize(parameters)} => {e}");
+				}
+			}
 		}
 
-		private IDisposable Subject(ResolveFieldContext context, Dictionary<string, object> baseMetricMetadata)
+		private IDisposable Subject(
+			IResolveFieldContext context,
+			Dictionary<string, object> baseMetricMetadata)
 		{
 			if (baseMetricMetadata == null)
 			{
@@ -1227,7 +1331,10 @@ namespace GraphQL.Annotations.TSql
 			);
 		}
 
-		private IDisposable Subject(string subject, ResolveFieldContext context, IDictionary<string, object> baseMetricMetadata)
+		private IDisposable Subject(
+			string subject,
+			IResolveFieldContext context,
+			IDictionary<string, object> baseMetricMetadata)
 		{
 			if (baseMetricMetadata == null)
 			{
@@ -1249,43 +1356,42 @@ namespace GraphQL.Annotations.TSql
 		public static IEnumerable<QueryArgument> GetArgumentsForType(bool isRoot)
 		{
 			var result = typeof(T)
-				.GetProperties(BindingFlags.Public | BindingFlags.IgnoreCase | BindingFlags.Instance)
+				.GetProperties(
+					BindingFlags.Public | BindingFlags.IgnoreCase | BindingFlags.Instance)
 				.Select(
 					prop => new
 					{
-						prop,
-						fieldAttr = prop.GetCustomAttribute<SqlGraphQLFieldAttribute>()
+						prop, fieldAttr = prop.GetCustomAttribute<SqlGraphQLFieldAttribute>()
 					})
 				.Where(v => v.fieldAttr != null)
 				.Select(
 					v => new QueryArgument(
-						SqlFieldResolver<T>.GetParamType(v.fieldAttr.ReturnType ?? v.prop.PropertyType.ToGraphType()))
+						SqlFieldResolver<T>.GetParamType(
+							v.fieldAttr.ReturnType ?? v.prop.PropertyType.ToGraphType()))
 					{
 						Name = v.fieldAttr.Name ?? Utils.FirstCharacterToLower(v.prop.Name),
 						Description = v.fieldAttr.Description
 					})
-			    .Prepend(
-			        new QueryArgument<ListGraphType<StringGraphType>>
-			        {
-			            Name = "_groupBy",
-			            Description = "By default columns will not be grouped unless _count is requested, then all " +
-			                          "columns will be grouped by. If you supply this parameter the defaults will be " +
-			                          "turned off and the records will first be grouped by these fields, then will be " +
-			                          "distincted when joined the rest of the fields. This field should contain an array " +
-			                          "of strings containing the object.field notation of the desired grouping"
-			        });
+				.Prepend(
+					new QueryArgument<ListGraphType<StringGraphType>>
+					{
+						Name = "_groupBy",
+						Description =
+							"By default columns will not be grouped unless _count is requested, then all "
+							+ "columns will be grouped by. If you supply this parameter the defaults will be "
+							+ "turned off and the records will first be grouped by these fields, then will be "
+							+ "distincted when joined the rest of the fields. This field should contain an array "
+							+ "of strings containing the object.field notation of the desired grouping"
+					});
 			if (isRoot)
 			{
 				result = result
 					.Prepend(
-						new QueryArgument<ListGraphType<OrderByParameter>>
-							{Name = "_orderBy"})
+						new QueryArgument<ListGraphType<OrderByParameter>> {Name = "_orderBy"})
 					.Prepend(
-						new QueryArgument<IntGraphType>
-							{Name = "_offset"})
-				    .Prepend(
-				        new QueryArgument<IntGraphType>
-				            {Name = "_fetchCount"});
+						new QueryArgument<IntGraphType> {Name = "_offset"})
+					.Prepend(
+						new QueryArgument<IntGraphType> {Name = "_fetchCount"});
 			}
 
 			return result;
@@ -1303,39 +1409,39 @@ namespace GraphQL.Annotations.TSql
 	}
 
 	public struct DbValue
-    {
-        private static Dictionary<Type, SqlDbType> typeMap = new Dictionary<Type, SqlDbType>
-        {
-            {typeof(string), SqlDbType.NVarChar},
-            {typeof(char[]), SqlDbType.NVarChar},
-            {typeof(byte), SqlDbType.TinyInt},
-            {typeof(short), SqlDbType.SmallInt},
-            {typeof(int), SqlDbType.Int},
-            {typeof(long), SqlDbType.BigInt},
-            {typeof(byte[]), SqlDbType.Image},
-            {typeof(bool), SqlDbType.Bit},
-            {typeof(DateTime), SqlDbType.DateTime2},
-            {typeof(DateTimeOffset), SqlDbType.DateTimeOffset},
-            {typeof(decimal), SqlDbType.Money},
-            {typeof(float), SqlDbType.Real},
-            {typeof(double), SqlDbType.Float},
-            {typeof(TimeSpan), SqlDbType.Time},
-            {typeof(Guid), SqlDbType.UniqueIdentifier}
-        };
+	{
+		private static Dictionary<Type, SqlDbType> typeMap = new Dictionary<Type, SqlDbType>
+		{
+			{typeof(string), SqlDbType.NVarChar},
+			{typeof(char[]), SqlDbType.NVarChar},
+			{typeof(byte), SqlDbType.TinyInt},
+			{typeof(short), SqlDbType.SmallInt},
+			{typeof(int), SqlDbType.Int},
+			{typeof(long), SqlDbType.BigInt},
+			{typeof(byte[]), SqlDbType.Image},
+			{typeof(bool), SqlDbType.Bit},
+			{typeof(DateTime), SqlDbType.DateTime2},
+			{typeof(DateTimeOffset), SqlDbType.DateTimeOffset},
+			{typeof(decimal), SqlDbType.Money},
+			{typeof(float), SqlDbType.Real},
+			{typeof(double), SqlDbType.Float},
+			{typeof(TimeSpan), SqlDbType.Time},
+			{typeof(Guid), SqlDbType.UniqueIdentifier}
+		};
 
-        public SqlDbType Type;
-        public object Value;
+		public SqlDbType Type;
+		public object Value;
 
-        public DbValue(object value)
-        {
-            this.Value = value;
-            this.Type = value == null ? SqlDbType.NVarChar : DbValue.typeMap[value.GetType()];
-        }
+		public DbValue(object value)
+		{
+			this.Value = value;
+			this.Type = value == null ? SqlDbType.NVarChar : DbValue.typeMap[value.GetType()];
+		}
 
-        public DbValue(object value, SqlDbType type)
-        {
-            this.Value = value;
-            this.Type = type;
-        }
-    }
+		public DbValue(object value, SqlDbType type)
+		{
+			this.Value = value;
+			this.Type = type;
+		}
+	}
 }

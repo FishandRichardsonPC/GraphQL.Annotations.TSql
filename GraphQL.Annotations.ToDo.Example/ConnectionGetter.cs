@@ -14,7 +14,7 @@ namespace GraphQL.Annotations.ToDo.Example
 			this._configuration = configuration;
 		}
 
-		public SqlConnection GetConnection(ResolveFieldContext context)
+		public SqlConnection GetConnection(IResolveFieldContext context)
 		{
 			return new SqlConnection(this._configuration.GetConnectionString("Database"));
 		}

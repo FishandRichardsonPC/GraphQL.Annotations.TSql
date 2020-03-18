@@ -25,7 +25,7 @@ namespace GraphQL.Annotations.TSql.Generators
 
         public string BuildQuery<T>(
             BatchItem batch,
-            ResolveFieldContext context,
+            IResolveFieldContext context,
             SqlFieldResolver<T> resolver,
             string previousFrom,
             string joinTo
@@ -34,7 +34,7 @@ namespace GraphQL.Annotations.TSql.Generators
             return this._simple.BuildQuery(batch, context, resolver, previousFrom, joinTo);
         }
 
-        public void GetExtraParams<T>(BatchItem batch, ResolveFieldContext context, SqlFieldResolver<T> resolver, Dictionary<string, DbValue> parameters) where T : SqlFieldResolver<T>, new()
+        public void GetExtraParams<T>(BatchItem batch, IResolveFieldContext context, SqlFieldResolver<T> resolver, Dictionary<string, DbValue> parameters) where T : SqlFieldResolver<T>, new()
         {
             this._simple.GetExtraParams(batch, context, resolver, parameters);
         }

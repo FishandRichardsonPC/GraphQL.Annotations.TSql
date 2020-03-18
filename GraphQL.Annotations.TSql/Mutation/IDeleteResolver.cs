@@ -4,6 +4,6 @@ namespace GraphQL.Annotations.TSql.Mutation
 {
 	public interface IDeleteResolver<in TIdType>
 	{
-		void Delete(ResolveFieldContext context, TIdType id);
+		void Delete(IResolveFieldContext context, TIdType id);
 	}
 }

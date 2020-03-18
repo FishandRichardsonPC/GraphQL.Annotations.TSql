@@ -31,12 +31,12 @@ namespace GraphQL.Annotations.ToDo.Example.models
 		IMutationResolver<ToDo, ToDoMutable>,
 		IDeleteResolver<Guid>
 	{
-		public ToDo Mutate(ResolveFieldContext context, ToDoMutable input)
+		public ToDo Mutate(IResolveFieldContext context, ToDoMutable input)
 		{
 			return SqlFieldMutator.Mutate<ToDo, ToDoMutable>(context, input);
 		}
 
-		public void Delete(ResolveFieldContext context, Guid id)
+		public void Delete(IResolveFieldContext context, Guid id)
 		{
 			SqlFieldMutator.Delete<ToDoMutable, Guid>(context, id);
 		}
